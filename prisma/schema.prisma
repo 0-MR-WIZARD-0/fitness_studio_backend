@@ -199,10 +199,11 @@ model Announcement {
 }
 
 model SiteSettings {
-  id              Int      @id @default(1)
-  address         String   @default("Малая Никитская ул., 8/1, Москва")
-  phone           String   @default("8-888-888-88-88")
-  email           String   @default("test@mail.ru")
-  courseThreshold Int      @default(3)
-  updatedAt       DateTime @updatedAt
+  id               Int      @id @default(1)
+  address          String   @default("Малая Никитская ул., 8/1, Москва")
+  phone            String   @default("8-888-888-88-88")
+  email            String   @default("test@mail.ru")
+  courseThreshold  Int      @default(3)
+  userAgreementUrl String   @default("")
+  updatedAt        DateTime @updatedAt
 }
