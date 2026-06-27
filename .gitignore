@@ -1,0 +1,14 @@
+/dist
+/node_modules
+/build
+
+/src/generated/prisma
+/uploads
+
+/prisma/migrations
+
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
