@@ -75,6 +75,36 @@ model Format {
   mechanisms HowItWorksStep[]
   bookings   Booking[]
   slots      Slot[]
+  rules      ConditionRule[]
+}
+
+enum RiskLevel {
+  ALLOWED
+  CAUTION
+  FORBIDDEN
+}
+
+model Condition {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rules ConditionRule[]
+}
+
+model ConditionRule {
+  id          Int       @id @default(autoincrement())
+  conditionId Int
+  condition   Condition @relation(fields: [conditionId], references: [id], onDelete: Cascade)
+  formatId    Int
+  format      Format    @relation(fields: [formatId], references: [id], onDelete: Cascade)
+  risk        RiskLevel @default(ALLOWED)
+  note        String    @default("")
+
+  @@unique([conditionId, formatId])
 }
 
 model ForWhomItem {
