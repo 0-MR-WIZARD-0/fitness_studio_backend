@@ -15,6 +15,7 @@ import { PromoModule } from './promo/promo.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { MailModule } from './mail/mail.module';
 import { SurveyModule } from './survey/survey.module';
+import { TrainersModule } from './trainers/trainers.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { SurveyModule } from './survey/survey.module';
     AnnouncementsModule,
     MailModule,
     SurveyModule,
+    TrainersModule,
   ],
 })
 export class AppModule {}

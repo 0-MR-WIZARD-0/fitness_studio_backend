@@ -74,7 +74,7 @@ export class BookingController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateSlotDto,
   ) {
-    return this.booking.updateSlot(id, dto.startsAt);
+    return this.booking.updateSlot(id, dto);
   }
 
   @UseGuards(AuthenticatedGuard)

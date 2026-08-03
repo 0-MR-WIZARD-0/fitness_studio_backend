@@ -14,6 +14,7 @@ import {
 
 export class CreateSlotDto {
   @IsOptional() @IsInt() formatId?: number;
+  @IsOptional() @IsInt() trainerId?: number | null;
   @IsDateString() startsAt: string;
   @IsOptional() @IsInt() durationMin?: number;
   @IsOptional() @IsInt() @Min(1) capacity?: number;
@@ -22,6 +23,7 @@ export class CreateSlotDto {
 
 export class CreateWeekdaySlotsDto {
   @IsOptional() @IsInt() formatId?: number;
+  @IsOptional() @IsInt() trainerId?: number | null;
   @Matches(/^\d{2}:\d{2}$/, { message: 'Время в формате HH:MM' })
   time: string;
   @IsInt() @Min(1) weeks: number;
@@ -33,6 +35,7 @@ export class CreateWeekdaySlotsDto {
 
 export class UpdateSlotDto {
   @IsDateString() startsAt: string;
+  @IsOptional() @IsInt() trainerId?: number | null;
 }
 
 export class SingleBookingDto {

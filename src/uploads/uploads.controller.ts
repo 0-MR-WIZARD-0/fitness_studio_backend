@@ -27,6 +27,7 @@ const FOLDERS = [
   'mechanisms',
   'announcements',
   'reviews',
+  'trainers',
   'misc',
 ];
 

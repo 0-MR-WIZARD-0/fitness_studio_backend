@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
@@ -31,6 +32,7 @@ export class UpsertFormatDto {
   @IsOptional() @IsString() heroImageUrl?: string | null;
   @IsOptional() @IsInt() pricePerSession?: number;
   @IsOptional() @IsInt() priceCourse?: number;
+  @IsOptional() @IsInt() @Min(5) durationMin?: number;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 

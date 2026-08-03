@@ -66,6 +66,7 @@ model Format {
   heroImageUrl    String?
   pricePerSession Int      @default(0)
   priceCourse     Int      @default(0)
+  durationMin     Int      @default(60)
   order           Int      @default(0)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -157,6 +158,20 @@ enum BookingStatus {
   CANCELLED
 }
 
+model Trainer {
+  id          Int      @id @default(autoincrement())
+  name        String
+  role        String   @default("")
+  description String   @default("")
+  photoUrl    String?
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  slots Slot[]
+}
+
 model Slot {
   id           Int      @id @default(autoincrement())
   startsAt     DateTime
@@ -168,13 +183,16 @@ model Slot {
   formatId Int?
   format   Format? @relation(fields: [formatId], references: [id], onDelete: Cascade)
 
+  trainerId Int?
+  trainer   Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+
   bookings Booking[]
 }
 
 model Booking {
   id             Int           @id @default(autoincrement())
   slotId         Int?
-  slot           Slot?         @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  slot           Slot?         @relation(fields: [slotId], references: [id], onDelete: SetNull)
   formatId       Int?
   format         Format?       @relation(fields: [formatId], references: [id], onDelete: SetNull)
   announcementId Int?
@@ -219,6 +237,7 @@ model Announcement {
   description String   @default("")
   imageUrl    String?
   startsAt    DateTime
+  durationMin Int      @default(60)
   capacity    Int      @default(7)
   price       Int      @default(0)
   isFree      Boolean  @default(false)
@@ -235,5 +254,7 @@ model SiteSettings {
   email            String   @default("test@mail.ru")
   courseThreshold  Int      @default(3)
   userAgreementUrl String   @default("")
+  telegramUrl      String   @default("")
+  maxUrl           String   @default("")
   updatedAt        DateTime @updatedAt
 }

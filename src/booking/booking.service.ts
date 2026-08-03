@@ -2,11 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromoService } from '../promo/promo.service';
+import { courseIds } from './course';
 import { MailService } from '../mail/mail.service';
 import {
   AnnouncementBookingDto,
@@ -14,6 +17,7 @@ import {
   CreateSlotDto,
   CreateWeekdaySlotsDto,
   SingleBookingDto,
+  UpdateSlotDto,
 } from './dto';
 
 const MS_DAY = 86400000;
@@ -44,6 +48,7 @@ export class BookingService {
       orderBy: { startsAt: 'asc' },
       include: {
         format: true,
+        trainer: true,
         _count: { select: { bookings: true } },
       },
     });
@@ -56,6 +61,8 @@ export class BookingService {
         formatId: s.formatId,
         isDiagnostic: s.isDiagnostic,
         formatName: s.format?.name ?? null,
+        trainerId: s.trainerId,
+        trainerName: s.trainer?.name ?? null,
         pricePerSession: s.format?.pricePerSession ?? 0,
         coursePerSession: s.format
           ? Math.round(s.format.priceCourse / threshold)
@@ -76,6 +83,7 @@ export class BookingService {
       orderBy: { startsAt: 'asc' },
       include: {
         format: true,
+        trainer: true,
         bookings: true,
         _count: { select: { bookings: true } },
       },
@@ -85,12 +93,20 @@ export class BookingService {
   async createSlot(dto: CreateSlotDto) {
     if (!dto.isDiagnostic && !dto.formatId)
       throw new BadRequestException('Для занятия нужен формат');
-    if (dto.formatId) await this.ensureFormat(dto.formatId);
+    const format = dto.formatId ? await this.ensureFormat(dto.formatId) : null;
+    if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
+
+    const startsAt = new Date(dto.startsAt);
+    const durationMin =
+      dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
+    await this.ensureTrainerFree(dto.trainerId ?? null, startsAt, durationMin);
+
     return this.prisma.slot.create({
       data: {
         formatId: dto.isDiagnostic ? null : dto.formatId,
-        startsAt: new Date(dto.startsAt),
-        durationMin: dto.durationMin ?? 30,
+        trainerId: dto.trainerId ?? null,
+        startsAt,
+        durationMin,
         capacity: dto.capacity ?? 7,
         isDiagnostic: dto.isDiagnostic ?? false,
       },
@@ -100,13 +116,17 @@ export class BookingService {
   async createWeekdaySlots(dto: CreateWeekdaySlotsDto) {
     if (!dto.isDiagnostic && !dto.formatId)
       throw new BadRequestException('Для занятия нужен формат');
-    if (dto.formatId) await this.ensureFormat(dto.formatId);
+    const format = dto.formatId ? await this.ensureFormat(dto.formatId) : null;
+    if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
+    const durationMin =
+      dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
     const [h, m] = dto.time.split(':').map(Number);
     const start = dto.fromDate ? new Date(dto.fromDate) : new Date();
     start.setHours(0, 0, 0, 0);
 
     const data: {
       formatId: number | null;
+      trainerId: number | null;
       startsAt: Date;
       durationMin: number;
       capacity: number;
@@ -120,22 +140,50 @@ export class BookingService {
       if (d.getTime() < Date.now()) continue;
       data.push({
         formatId: dto.isDiagnostic ? null : (dto.formatId as number),
+        trainerId: dto.trainerId ?? null,
         startsAt: new Date(d),
-        durationMin: dto.durationMin ?? 30,
+        durationMin,
         capacity: dto.capacity ?? 7,
         isDiagnostic: dto.isDiagnostic ?? false,
       });
     }
     if (!data.length) return { created: 0 };
-    await this.prisma.slot.createMany({ data });
-    return { created: data.length };
+
+    let skipped = 0;
+    const free: typeof data = [];
+    for (const item of data) {
+      const busy = await this.trainerBusy(
+        item.trainerId,
+        item.startsAt,
+        item.durationMin,
+      );
+      if (busy) skipped += 1;
+      else free.push(item);
+    }
+    if (!free.length)
+      throw new ConflictException(
+        'У этого тренера уже занято время во все выбранные дни',
+      );
+
+    await this.prisma.slot.createMany({ data: free });
+    return { created: free.length, skipped };
   }
 
-  async updateSlot(id: number, startsAt: string) {
-    await this.getSlot(id);
+  async updateSlot(id: number, dto: UpdateSlotDto) {
+    const slot = await this.getSlot(id);
+    if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
+
+    const startsAt = new Date(dto.startsAt);
+    const trainerId =
+      dto.trainerId !== undefined ? dto.trainerId : slot.trainerId;
+    await this.ensureTrainerFree(trainerId, startsAt, slot.durationMin, id);
+
     return this.prisma.slot.update({
       where: { id },
-      data: { startsAt: new Date(startsAt) },
+      data: {
+        startsAt,
+        ...(dto.trainerId !== undefined ? { trainerId: dto.trainerId } : {}),
+      },
     });
   }
 
@@ -220,20 +268,15 @@ export class BookingService {
           );
       }
 
-      const times = slots.map((s) => s.startsAt.getTime());
-      const span = Math.max(...times) - Math.min(...times);
-      const isCourse = slots.length >= threshold && span <= 6 * MS_DAY;
-
-      if (slots.length >= threshold && span > 6 * MS_DAY)
-        throw new BadRequestException(
-          'Для курса все занятия должны уместиться в 7 дней',
-        );
-
+      const inCourse = courseIds(slots, threshold);
+      const isCourse = inCourse.size > 0;
       const courseGroupId = isCourse ? randomUUID() : null;
+
       let total = 0;
       for (const s of slots) {
         const fmt = s.format;
-        const price = isCourse
+        const counted = inCourse.has(s.id);
+        const price = counted
           ? Math.round((fmt?.priceCourse ?? 0) / threshold)
           : (fmt?.pricePerSession ?? 0);
         total += price;
@@ -244,8 +287,8 @@ export class BookingService {
             name: dto.name,
             phone: dto.phone,
             email: dto.email,
-            isCourse,
-            courseGroupId,
+            isCourse: counted,
+            courseGroupId: counted ? courseGroupId : null,
             price,
           },
         });
@@ -348,6 +391,76 @@ export class BookingService {
     const f = await this.prisma.format.findUnique({ where: { id } });
     if (!f) throw new NotFoundException('Формат не найден');
     return f;
+  }
+
+  private async ensureTrainer(id: number) {
+    const t = await this.prisma.trainer.findUnique({ where: { id } });
+    if (!t) throw new NotFoundException('Тренер не найден');
+    return t;
+  }
+
+  private async trainerBusy(
+    trainerId: number | null,
+    startsAt: Date,
+    durationMin: number,
+    exceptSlotId?: number,
+  ) {
+    if (!trainerId) return null;
+    const endsAt = new Date(startsAt.getTime() + durationMin * 60000);
+    const dayStart = new Date(startsAt);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + MS_DAY);
+
+    const sameDay = await this.prisma.slot.findMany({
+      where: {
+        trainerId,
+        startsAt: { gte: dayStart, lt: dayEnd },
+        ...(exceptSlotId ? { id: { not: exceptSlotId } } : {}),
+      },
+    });
+
+    return (
+      sameDay.find((s) => {
+        const sEnd = new Date(s.startsAt.getTime() + s.durationMin * 60000);
+        return s.startsAt < endsAt && startsAt < sEnd;
+      }) ?? null
+    );
+  }
+
+  private async ensureTrainerFree(
+    trainerId: number | null,
+    startsAt: Date,
+    durationMin: number,
+    exceptSlotId?: number,
+  ) {
+    const busy = await this.trainerBusy(
+      trainerId,
+      startsAt,
+      durationMin,
+      exceptSlotId,
+    );
+    if (busy) {
+      const time = busy.startsAt.toLocaleString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      throw new ConflictException(
+        `У этого тренера уже есть занятие в это время (${time}, ${busy.durationMin} мин)`,
+      );
+    }
+  }
+
+  @Cron('10 0 * * *')
+  async cleanupPastSlots() {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const res = await this.prisma.slot.deleteMany({
+      where: { startsAt: { lt: startOfToday } },
+    });
+    if (res.count)
+      new Logger('Booking').log(`Удалено прошедших занятий: ${res.count}`);
   }
 
   private async getSlot(id: number) {

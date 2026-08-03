@@ -28,6 +28,7 @@ class UpsertAnnouncementDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() imageUrl?: string | null;
   @IsDateString() startsAt: string;
+  @IsOptional() @IsInt() durationMin?: number;
   @IsOptional() @IsInt() capacity?: number;
   @IsOptional() @IsInt() price?: number;
   @IsOptional() @IsBoolean() isFree?: boolean;
@@ -55,6 +56,7 @@ class AnnouncementsService {
       description: dto.description,
       imageUrl: dto.imageUrl,
       startsAt: new Date(dto.startsAt),
+      durationMin: dto.durationMin,
       capacity: dto.capacity,
       price: dto.price,
       isFree: dto.isFree,
