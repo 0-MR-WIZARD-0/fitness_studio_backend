@@ -5,8 +5,6 @@
 /src/generated/prisma
 /uploads
 
-/prisma/migrations
-
 .env
 .env.development.local
 .env.test.local
