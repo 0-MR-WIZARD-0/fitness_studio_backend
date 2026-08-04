@@ -4,13 +4,15 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromoService } from '../promo/promo.service';
-import { courseIds } from './course';
+import { courseGroups } from './course';
 import { MailService } from '../mail/mail.service';
+import { AuthService } from '../auth/auth.service';
 import {
   AnnouncementBookingDto,
   CartBookingDto,
@@ -28,6 +30,7 @@ export class BookingService {
     private readonly prisma: PrismaService,
     private readonly promo: PromoService,
     private readonly mail: MailService,
+    private readonly auth: AuthService,
   ) {}
 
   async availableSlots(formatId?: number) {
@@ -42,7 +45,6 @@ export class BookingService {
   }
 
   private async mapAvailable(where: Record<string, unknown>) {
-    const threshold = await this.courseThreshold();
     const slots = await this.prisma.slot.findMany({
       where: { startsAt: { gte: new Date() }, ...where },
       orderBy: { startsAt: 'asc' },
@@ -64,18 +66,10 @@ export class BookingService {
         trainerId: s.trainerId,
         trainerName: s.trainer?.name ?? null,
         pricePerSession: s.format?.pricePerSession ?? 0,
-        coursePerSession: s.format
-          ? Math.round(s.format.priceCourse / threshold)
-          : 0,
         taken: s._count.bookings,
         remaining: s.capacity - s._count.bookings,
       }))
       .filter((s) => s.remaining > 0);
-  }
-
-  private async courseThreshold(): Promise<number> {
-    const s = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
-    return Math.max(1, s?.courseThreshold ?? 3);
   }
 
   allSlots() {
@@ -169,11 +163,24 @@ export class BookingService {
     return { created: free.length, skipped };
   }
 
-  async updateSlot(id: number, dto: UpdateSlotDto) {
+  async updateSlot(id: number, dto: UpdateSlotDto, adminUsername?: string) {
     const slot = await this.getSlot(id);
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
 
     const startsAt = new Date(dto.startsAt);
+    const isReschedule = startsAt.getTime() !== slot.startsAt.getTime();
+
+    if (isReschedule) {
+      if (!dto.notified)
+        throw new BadRequestException(
+          'Подтвердите, что клиенты уведомлены о переносе',
+        );
+      const admin = dto.password
+        ? await this.auth.validateAdmin(adminUsername ?? '', dto.password)
+        : null;
+      if (!admin) throw new UnauthorizedException('Неверный пароль');
+    }
+
     const trainerId =
       dto.trainerId !== undefined ? dto.trainerId : slot.trainerId;
     await this.ensureTrainerFree(trainerId, startsAt, slot.durationMin, id);
@@ -268,17 +275,16 @@ export class BookingService {
           );
       }
 
-      const inCourse = courseIds(slots, threshold);
-      const isCourse = inCourse.size > 0;
-      const courseGroupId = isCourse ? randomUUID() : null;
+      const { groups, countedIds } = courseGroups(slots, threshold);
+      const groupIdBySlot = new Map<number, string>();
+      for (const group of groups) {
+        const groupId = randomUUID();
+        for (const s of group) groupIdBySlot.set(s.id, groupId);
+      }
 
       let total = 0;
       for (const s of slots) {
-        const fmt = s.format;
-        const counted = inCourse.has(s.id);
-        const price = counted
-          ? Math.round((fmt?.priceCourse ?? 0) / threshold)
-          : (fmt?.pricePerSession ?? 0);
+        const price = s.format?.pricePerSession ?? 0;
         total += price;
         await tx.booking.create({
           data: {
@@ -287,30 +293,31 @@ export class BookingService {
             name: dto.name,
             phone: dto.phone,
             email: dto.email,
-            isCourse: counted,
-            courseGroupId: counted ? courseGroupId : null,
+            isCourse: countedIds.has(s.id),
+            courseGroupId: groupIdBySlot.get(s.id) ?? null,
             price,
           },
         });
       }
-      return { isCourse, total, courseGroupId };
+      return { courses: groups.length, total };
     });
 
-    let giftCode: string | null = null;
-    if (outcome.isCourse) {
+    const giftCodes: string[] = [];
+    for (let i = 0; i < outcome.courses; i += 1) {
       const gift = await this.promo.createGift({
         name: dto.name,
         phone: dto.phone,
         email: dto.email,
       });
-      giftCode = gift.code;
+      giftCodes.push(gift.code);
       await this.mail.sendGiftCode(dto.email, gift.code);
     }
 
     return {
-      isCourse: outcome.isCourse,
+      isCourse: outcome.courses > 0,
+      courses: outcome.courses,
       total: outcome.total,
-      giftCode,
+      giftCodes,
       payment: {
         status: 'mock',
         redirectUrl: `/payment/mock?total=${outcome.total}`,

@@ -8,6 +8,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthenticatedGuard } from '../auth/guards';
@@ -73,8 +74,9 @@ export class BookingController {
   updateSlot(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateSlotDto,
+    @Req() req: { user?: { username?: string } },
   ) {
-    return this.booking.updateSlot(id, dto);
+    return this.booking.updateSlot(id, dto, req.user?.username);
   }
 
   @UseGuards(AuthenticatedGuard)

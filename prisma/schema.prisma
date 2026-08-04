@@ -65,7 +65,6 @@ model Format {
   previewImageUrl String?
   heroImageUrl    String?
   pricePerSession Int      @default(0)
-  priceCourse     Int      @default(0)
   durationMin     Int      @default(60)
   order           Int      @default(0)
   isActive        Boolean  @default(true)
@@ -235,7 +234,6 @@ model Announcement {
   id          Int      @id @default(autoincrement())
   title       String
   description String   @default("")
-  imageUrl    String?
   startsAt    DateTime
   durationMin Int      @default(60)
   capacity    Int      @default(7)

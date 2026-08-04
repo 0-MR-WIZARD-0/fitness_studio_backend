@@ -36,6 +36,8 @@ export class CreateWeekdaySlotsDto {
 export class UpdateSlotDto {
   @IsDateString() startsAt: string;
   @IsOptional() @IsInt() trainerId?: number | null;
+  @IsOptional() @IsString() password?: string;
+  @IsOptional() @IsBoolean() notified?: boolean;
 }
 
 export class SingleBookingDto {

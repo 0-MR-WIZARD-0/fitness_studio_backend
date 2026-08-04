@@ -99,7 +99,6 @@ export class FormatsService {
       previewImageUrl: dto.previewImageUrl,
       heroImageUrl: dto.heroImageUrl,
       pricePerSession: dto.pricePerSession,
-      priceCourse: dto.priceCourse,
       durationMin: dto.durationMin,
       order: dto.order,
       isActive: dto.isActive,

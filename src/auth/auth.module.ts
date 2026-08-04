@@ -9,5 +9,6 @@ import { SessionSerializer } from './session.serializer';
   imports: [PassportModule.register({ session: true })],
   controllers: [AuthController],
   providers: [AuthService, LocalStrategy, SessionSerializer],
+  exports: [AuthService],
 })
 export class AuthModule {}

@@ -26,7 +26,6 @@ import { AuthenticatedGuard } from '../auth/guards';
 class UpsertAnnouncementDto {
   @IsString() title: string;
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsString() imageUrl?: string | null;
   @IsDateString() startsAt: string;
   @IsOptional() @IsInt() durationMin?: number;
   @IsOptional() @IsInt() capacity?: number;
@@ -54,7 +53,6 @@ class AnnouncementsService {
     return {
       title: dto.title,
       description: dto.description,
-      imageUrl: dto.imageUrl,
       startsAt: new Date(dto.startsAt),
       durationMin: dto.durationMin,
       capacity: dto.capacity,
