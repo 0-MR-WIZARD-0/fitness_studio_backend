@@ -54,22 +54,20 @@ export class BookingService {
         _count: { select: { bookings: true } },
       },
     });
-    return slots
-      .map((s) => ({
-        id: s.id,
-        startsAt: s.startsAt,
-        durationMin: s.durationMin,
-        capacity: s.capacity,
-        formatId: s.formatId,
-        isDiagnostic: s.isDiagnostic,
-        formatName: s.format?.name ?? null,
-        trainerId: s.trainerId,
-        trainerName: s.trainer?.name ?? null,
-        pricePerSession: s.format?.pricePerSession ?? 0,
-        taken: s._count.bookings,
-        remaining: s.capacity - s._count.bookings,
-      }))
-      .filter((s) => s.remaining > 0);
+    return slots.map((s) => ({
+      id: s.id,
+      startsAt: s.startsAt,
+      durationMin: s.durationMin,
+      capacity: s.capacity,
+      formatId: s.formatId,
+      isDiagnostic: s.isDiagnostic,
+      formatName: s.format?.name ?? null,
+      trainerId: s.trainerId,
+      trainerName: s.trainer?.name ?? null,
+      pricePerSession: s.format?.pricePerSession ?? 0,
+      taken: s._count.bookings,
+      remaining: Math.max(0, s.capacity - s._count.bookings),
+    }));
   }
 
   allSlots() {

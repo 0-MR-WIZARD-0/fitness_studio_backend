@@ -168,7 +168,8 @@ model Trainer {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  slots Slot[]
+  slots         Slot[]
+  announcements Announcement[]
 }
 
 model Slot {
@@ -241,6 +242,9 @@ model Announcement {
   isFree      Boolean  @default(false)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
+
+  trainerId Int?
+  trainer   Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
 
   bookings Booking[]
 }

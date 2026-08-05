@@ -28,6 +28,7 @@ class UpsertAnnouncementDto {
   @IsOptional() @IsString() description?: string;
   @IsDateString() startsAt: string;
   @IsOptional() @IsInt() durationMin?: number;
+  @IsOptional() @IsInt() trainerId?: number | null;
   @IsOptional() @IsInt() capacity?: number;
   @IsOptional() @IsInt() price?: number;
   @IsOptional() @IsBoolean() isFree?: boolean;
@@ -38,15 +39,28 @@ class UpsertAnnouncementDto {
 class AnnouncementsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listPublic() {
-    return this.prisma.announcement.findMany({
-      where: { isActive: true, startsAt: { gte: new Date() } },
-      orderBy: { startsAt: 'asc' },
-    });
+  private withTrainer<
+    T extends { trainer?: { name: string } | null; trainerId: number | null },
+  >(item: T) {
+    const { trainer, ...rest } = item;
+    return { ...rest, trainerName: trainer?.name ?? null };
   }
 
-  listAll() {
-    return this.prisma.announcement.findMany({ orderBy: { startsAt: 'asc' } });
+  async listPublic() {
+    const items = await this.prisma.announcement.findMany({
+      where: { isActive: true, startsAt: { gte: new Date() } },
+      orderBy: { startsAt: 'asc' },
+      include: { trainer: true },
+    });
+    return items.map((a) => this.withTrainer(a));
+  }
+
+  async listAll() {
+    const items = await this.prisma.announcement.findMany({
+      orderBy: { startsAt: 'asc' },
+      include: { trainer: true },
+    });
+    return items.map((a) => this.withTrainer(a));
   }
 
   private data(dto: UpsertAnnouncementDto) {
@@ -55,6 +69,7 @@ class AnnouncementsService {
       description: dto.description,
       startsAt: new Date(dto.startsAt),
       durationMin: dto.durationMin,
+      trainerId: dto.trainerId ?? null,
       capacity: dto.capacity,
       price: dto.price,
       isFree: dto.isFree,
