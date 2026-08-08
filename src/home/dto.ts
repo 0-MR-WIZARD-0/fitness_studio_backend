@@ -9,6 +9,7 @@ import {
 export class UpdateHeroDto {
   @IsOptional() @IsString() title?: string;
   @IsOptional() @IsString() subtitle?: string;
+  @IsOptional() @IsString() subtitle2?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() imageUrl?: string | null;
   @IsOptional() spheres?: unknown;

@@ -27,6 +27,7 @@ model HomeHero {
   id          Int      @id @default(autoincrement())
   title       String   @default("ТРИЕДИНСТВО")
   subtitle    String   @default("Три сферы. Одна система. Тройной эффект")
+  subtitle2   String   @default("")
   description String   @default("")
   imageUrl    String?
   spheres     Json     @default("[]")
