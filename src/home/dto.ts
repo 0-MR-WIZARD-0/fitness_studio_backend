@@ -12,6 +12,7 @@ export class UpdateHeroDto {
   @IsOptional() @IsString() subtitle2?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() imageUrl?: string | null;
+  @IsOptional() @IsString() faqImageUrl?: string | null;
   @IsOptional() spheres?: unknown;
 }
 

@@ -30,6 +30,7 @@ model HomeHero {
   subtitle2   String   @default("")
   description String   @default("")
   imageUrl    String?
+  faqImageUrl String?
   spheres     Json     @default("[]")
   updatedAt   DateTime @updatedAt
 }
@@ -65,7 +66,6 @@ model Format {
   miniResults     String[]
   previewImageUrl String?
   heroImageUrl    String?
-  pricePerSession Int      @default(0)
   durationMin     Int      @default(60)
   order           Int      @default(0)
   isActive        Boolean  @default(true)
@@ -256,6 +256,8 @@ model SiteSettings {
   phone            String   @default("8-888-888-88-88")
   email            String   @default("test@mail.ru")
   courseThreshold  Int      @default(3)
+  pricePerSession  Int      @default(5000)
+  priceCourse      Int      @default(4000)
   userAgreementUrl String   @default("")
   telegramUrl      String   @default("")
   maxUrl           String   @default("")

@@ -30,7 +30,6 @@ export class UpsertFormatDto {
   @IsOptional() @IsArray() @IsString({ each: true }) miniResults?: string[];
   @IsOptional() @IsString() previewImageUrl?: string | null;
   @IsOptional() @IsString() heroImageUrl?: string | null;
-  @IsOptional() @IsInt() pricePerSession?: number;
   @IsOptional() @IsInt() @Min(5) durationMin?: number;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;

@@ -29,6 +29,8 @@ class UpdateSettingsDto {
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsInt() @Min(1) courseThreshold?: number;
+  @IsOptional() @IsInt() @Min(0) pricePerSession?: number;
+  @IsOptional() @IsInt() @Min(0) priceCourse?: number;
   @IsOptional() @IsString() telegramUrl?: string;
   @IsOptional() @IsString() maxUrl?: string;
 }

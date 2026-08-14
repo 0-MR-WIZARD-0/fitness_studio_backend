@@ -44,7 +44,17 @@ export class BookingService {
     return this.mapAvailable({ isDiagnostic: true });
   }
 
+  private async prices() {
+    const s = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    return {
+      single: s?.pricePerSession ?? 5000,
+      course: s?.priceCourse ?? 4000,
+      threshold: Math.max(1, s?.courseThreshold ?? 3),
+    };
+  }
+
   private async mapAvailable(where: Record<string, unknown>) {
+    const { single } = await this.prices();
     const slots = await this.prisma.slot.findMany({
       where: { startsAt: { gte: new Date() }, ...where },
       orderBy: { startsAt: 'asc' },
@@ -64,7 +74,7 @@ export class BookingService {
       formatName: s.format?.name ?? null,
       trainerId: s.trainerId,
       trainerName: s.trainer?.name ?? null,
-      pricePerSession: s.format?.pricePerSession ?? 0,
+      pricePerSession: s.isDiagnostic ? 0 : single,
       taken: s._count.bookings,
       remaining: Math.max(0, s.capacity - s._count.bookings),
     }));
@@ -199,6 +209,7 @@ export class BookingService {
   }
 
   async bookSingle(dto: SingleBookingDto) {
+    const { single } = await this.prices();
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
       : null;
@@ -218,7 +229,7 @@ export class BookingService {
       if (slot._count.bookings >= slot.capacity)
         throw new ConflictException('Свободных мест нет');
 
-      const base = slot.isDiagnostic ? 0 : (slot.format?.pricePerSession ?? 0);
+      const base = slot.isDiagnostic ? 0 : single;
       const free = slot.isDiagnostic || !!promo;
       const price = free ? 0 : base;
 
@@ -251,10 +262,7 @@ export class BookingService {
 
   async bookCart(dto: CartBookingDto) {
     const ids = [...new Set(dto.slotIds)];
-    const settings = await this.prisma.siteSettings.findUnique({
-      where: { id: 1 },
-    });
-    const threshold = settings?.courseThreshold ?? 3;
+    const { single, course, threshold } = await this.prices();
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       const slots = await tx.slot.findMany({
@@ -282,7 +290,8 @@ export class BookingService {
 
       let total = 0;
       for (const s of slots) {
-        const price = s.format?.pricePerSession ?? 0;
+        // занятия, вошедшие в курс, считаются по курсовой цене
+        const price = countedIds.has(s.id) ? course : single;
         total += price;
         await tx.booking.create({
           data: {
