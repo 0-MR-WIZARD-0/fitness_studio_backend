@@ -3,9 +3,10 @@ import { BookingService } from './booking.service';
 import { BookingController } from './booking.controller';
 import { PromoModule } from '../promo/promo.module';
 import { AuthModule } from '../auth/auth.module';
+import { RentModule } from '../rent/rent.module';
 
 @Module({
-  imports: [PromoModule, AuthModule],
+  imports: [PromoModule, AuthModule, RentModule],
   providers: [BookingService],
   controllers: [BookingController],
 })

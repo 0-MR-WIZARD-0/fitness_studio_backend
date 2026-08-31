@@ -13,6 +13,7 @@ import { PromoService } from '../promo/promo.service';
 import { courseGroups } from './course';
 import { MailService } from '../mail/mail.service';
 import { AuthService } from '../auth/auth.service';
+import { RentService } from '../rent/rent.module';
 import {
   AnnouncementBookingDto,
   CartBookingDto,
@@ -31,6 +32,7 @@ export class BookingService {
     private readonly promo: PromoService,
     private readonly mail: MailService,
     private readonly auth: AuthService,
+    private readonly rent: RentService,
   ) {}
 
   async availableSlots(formatId?: number) {
@@ -101,6 +103,7 @@ export class BookingService {
     const startsAt = new Date(dto.startsAt);
     const durationMin =
       dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
+    await this.ensureNotRented(startsAt, durationMin);
     await this.ensureTrainerFree(dto.trainerId ?? null, startsAt, durationMin);
 
     return this.prisma.slot.create({
@@ -154,17 +157,19 @@ export class BookingService {
     let skipped = 0;
     const free: typeof data = [];
     for (const item of data) {
+      const endsAt = new Date(item.startsAt.getTime() + item.durationMin * 60000);
+      const rented = await this.rent.findRentalOverlap(item.startsAt, endsAt);
       const busy = await this.trainerBusy(
         item.trainerId,
         item.startsAt,
         item.durationMin,
       );
-      if (busy) skipped += 1;
+      if (busy || rented) skipped += 1;
       else free.push(item);
     }
     if (!free.length)
       throw new ConflictException(
-        'У этого тренера уже занято время во все выбранные дни',
+        'Во все выбранные дни это время занято — тренером или арендой студии',
       );
 
     await this.prisma.slot.createMany({ data: free });
@@ -191,6 +196,7 @@ export class BookingService {
 
     const trainerId =
       dto.trainerId !== undefined ? dto.trainerId : slot.trainerId;
+    await this.ensureNotRented(startsAt, slot.durationMin);
     await this.ensureTrainerFree(trainerId, startsAt, slot.durationMin, id);
 
     return this.prisma.slot.update({
@@ -411,6 +417,22 @@ export class BookingService {
     const t = await this.prisma.trainer.findUnique({ where: { id } });
     if (!t) throw new NotFoundException('Тренер не найден');
     return t;
+  }
+
+  private async ensureNotRented(startsAt: Date, durationMin: number) {
+    const endsAt = new Date(startsAt.getTime() + durationMin * 60000);
+    const rental = await this.rent.findRentalOverlap(startsAt, endsAt);
+    if (rental) {
+      const when = rental.startsAt.toLocaleString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      throw new ConflictException(
+        `На это время студия сдана в аренду (${when}) — занятие поставить нельзя`,
+      );
+    }
   }
 
   private async trainerBusy(

@@ -190,6 +190,19 @@ model Slot {
   bookings Booking[]
 }
 
+model RentalSlot {
+  id        Int      @id @default(autoincrement())
+  startsAt  DateTime
+  endsAt    DateTime
+  price     Int      @default(0)
+  comment   String   @default("")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings Booking[]
+}
+
 model Booking {
   id             Int           @id @default(autoincrement())
   slotId         Int?
@@ -198,6 +211,8 @@ model Booking {
   format         Format?       @relation(fields: [formatId], references: [id], onDelete: SetNull)
   announcementId Int?
   announcement   Announcement? @relation(fields: [announcementId], references: [id], onDelete: SetNull)
+  rentalSlotId   Int?
+  rentalSlot     RentalSlot?   @relation(fields: [rentalSlotId], references: [id], onDelete: SetNull)
   promoCodeId    Int?
   promoCode      PromoCode?    @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
   name           String
