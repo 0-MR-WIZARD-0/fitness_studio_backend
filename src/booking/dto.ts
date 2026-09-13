@@ -54,6 +54,8 @@ export class SingleBookingDto {
   @IsInt() slotId: number;
   @IsOptional() @IsString() promoCode?: string;
   @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() phone?: string;
 }
 
 export class CartBookingDto {
@@ -65,4 +67,6 @@ export class AnnouncementBookingDto {
   @IsInt() announcementId: number;
   @IsOptional() @IsString() promoCode?: string;
   @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() phone?: string;
 }

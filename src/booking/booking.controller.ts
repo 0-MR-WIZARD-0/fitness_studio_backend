@@ -12,7 +12,11 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthenticatedGuard } from '../auth/guards';
-import { UserGuard, currentUserId } from '../account/account.module';
+import {
+  UserGuard,
+  currentUserId,
+  optionalUserId,
+} from '../account/account.module';
 import { BookingService } from './booking.service';
 import {
   AnnouncementBookingDto,
@@ -40,10 +44,9 @@ export class BookingController {
     return this.booking.diagnosticSlots();
   }
 
-  @UseGuards(UserGuard)
   @Post('single')
   bookSingle(@Body() dto: SingleBookingDto, @Req() req: Request) {
-    return this.booking.bookSingle(dto, currentUserId(req));
+    return this.booking.bookSingle(dto, optionalUserId(req));
   }
 
   @UseGuards(UserGuard)
@@ -52,10 +55,9 @@ export class BookingController {
     return this.booking.bookCart(dto, currentUserId(req));
   }
 
-  @UseGuards(UserGuard)
   @Post('announcement')
   bookAnnouncement(@Body() dto: AnnouncementBookingDto, @Req() req: Request) {
-    return this.booking.bookAnnouncement(dto, currentUserId(req));
+    return this.booking.bookAnnouncement(dto, optionalUserId(req));
   }
 
   @UseGuards(AuthenticatedGuard)

@@ -79,6 +79,10 @@ export class UserGuard implements CanActivate {
   }
 }
 
+export function optionalUserId(req: Request): number | null {
+  return req.session?.userId ?? null;
+}
+
 export function currentUserId(req: Request): number {
   const id = req.session?.userId;
   if (!id) throw new UnauthorizedException('Войдите в личный кабинет');
@@ -286,7 +290,7 @@ export class AccountService {
           isCourse: b.isCourse,
           status: b.status,
           promoCode: b.promoCode?.code ?? null,
-          canMove: editable && (kind === 'LESSON' || kind === 'RENT'),
+        canMove: editable && kind === 'LESSON',
           canCancel: editable,
           canFreeze:
             editable &&
@@ -495,28 +499,10 @@ export class AccountService {
     const booking = await this.own(userId, bookingId);
     await this.ensureInTime(this.startOf(booking));
 
-    if (booking.rentalSlotId) {
-      if (!dto.rentalSlotId)
-        throw new BadRequestException('Выберите новый слот аренды');
-      const target = await this.prisma.rentalSlot.findUnique({
-        where: { id: dto.rentalSlotId },
-        include: { bookings: { where: ACTIVE_BOOKINGS, select: { id: true } } },
-      });
-      if (!target || !target.isActive)
-        throw new NotFoundException('Слот аренды не найден');
-      if (target.startsAt.getTime() < Date.now())
-        throw new BadRequestException('Это время уже прошло');
-      if (target.bookings.length)
-        throw new ConflictException('Студия на это время уже занята');
-
-      return this.prisma.booking.update({
-        where: { id: bookingId },
-        data: {
-          rentalSlotId: target.id,
-          price: booking.isFree ? 0 : target.price,
-        },
-      });
-    }
+    if (booking.rentalSlotId)
+      throw new BadRequestException(
+        'Бронь зала переносить нельзя — отмените её и выберите другое время',
+      );
 
     if (!booking.slotId)
       throw new BadRequestException(

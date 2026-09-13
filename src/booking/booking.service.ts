@@ -45,6 +45,14 @@ export class BookingService {
     return user;
   }
 
+  private guest(dto: { name?: string; phone?: string }) {
+    const name = dto.name?.trim();
+    const phone = dto.phone?.trim();
+    if (!name) throw new BadRequestException('Укажите ФИО');
+    if (!phone) throw new BadRequestException('Укажите телефон');
+    return { id: null as number | null, name, phone, email: null };
+  }
+
   async availableSlots(formatId?: number) {
     return this.mapAvailable({
       isDiagnostic: false,
@@ -269,9 +277,13 @@ export class BookingService {
     return { ok: true, cancelled: slot._count.bookings };
   }
 
-  async bookSingle(dto: SingleBookingDto, userId: number) {
-    const user = await this.client(userId);
+  async bookSingle(dto: SingleBookingDto, userId: number | null) {
+    const user = userId ? await this.client(userId) : null;
     await this.documents.ensureAccepted(dto.documentIds);
+    if (dto.promoCode && !user)
+      throw new UnauthorizedException(
+        'Промокод работает в личном кабинете — войдите',
+      );
     const { single } = await this.prices();
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
@@ -290,6 +302,10 @@ export class BookingService {
         },
       });
       if (!slot) throw new NotFoundException('Слот не найден');
+      if (!user && !slot.isDiagnostic)
+        throw new UnauthorizedException(
+          'Записаться на занятие можно из личного кабинета — войдите',
+        );
       if (slot.startsAt.getTime() < Date.now())
         throw new BadRequestException('Слот уже прошёл');
       if (slot._count.bookings >= slot.capacity)
@@ -306,14 +322,15 @@ export class BookingService {
         });
       }
 
+      const client = user ?? this.guest(dto);
       const booking = await tx.booking.create({
         data: {
-          userId: user.id,
+          userId: client.id,
           slotId: slot.id,
           formatId: slot.formatId,
-          name: user.name,
-          phone: user.phone,
-          email: user.email,
+          name: client.name,
+          phone: client.phone,
+          email: client.email,
           isDiagnostic: slot.isDiagnostic,
           price,
           isFree: free,
@@ -417,9 +434,13 @@ export class BookingService {
     };
   }
 
-  async bookAnnouncement(dto: AnnouncementBookingDto, userId: number) {
-    const user = await this.client(userId);
+  async bookAnnouncement(dto: AnnouncementBookingDto, userId: number | null) {
+    const user = userId ? await this.client(userId) : null;
     await this.documents.ensureAccepted(dto.documentIds);
+    if (dto.promoCode && !user)
+      throw new UnauthorizedException(
+        'Промокод работает в личном кабинете — войдите',
+      );
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
       : null;
@@ -436,6 +457,10 @@ export class BookingService {
         },
       });
       if (!a) throw new NotFoundException('Анонс не найден');
+      if (!user && !a.isFree)
+        throw new UnauthorizedException(
+          'Записаться на платный анонс можно из личного кабинета — войдите',
+        );
       if (a._count.bookings >= a.capacity)
         throw new ConflictException('Мест нет');
 
@@ -447,13 +472,14 @@ export class BookingService {
           data: { isUsed: true, usedAt: new Date() },
         });
 
+      const client = user ?? this.guest(dto);
       const booking = await tx.booking.create({
         data: {
-          userId: user.id,
+          userId: client.id,
           announcementId: a.id,
-          name: user.name,
-          phone: user.phone,
-          email: user.email,
+          name: client.name,
+          phone: client.phone,
+          email: client.email,
           price,
           isFree: free,
           promoCodeId: promo?.id,
