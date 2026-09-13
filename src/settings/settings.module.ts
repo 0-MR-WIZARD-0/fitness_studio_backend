@@ -20,6 +20,7 @@ import { randomBytes } from 'crypto';
 import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedGuard } from '../auth/guards';
+import { RentModule, RentService } from '../rent/rent.module';
 
 const AGREEMENT_FOLDER = 'Пользовательское соглашение';
 const AGREEMENT_DIR = join('./uploads', AGREEMENT_FOLDER);
@@ -33,11 +34,19 @@ class UpdateSettingsDto {
   @IsOptional() @IsInt() @Min(0) priceCourse?: number;
   @IsOptional() @IsString() telegramUrl?: string;
   @IsOptional() @IsString() maxUrl?: string;
+  @IsOptional() @IsInt() @Min(0) rentPricePerHour?: number;
+  @IsOptional() @IsString() rentDayStart?: string;
+  @IsOptional() @IsString() rentDayEnd?: string;
+  @IsOptional() @IsInt() @Min(0) rentBufferMin?: number;
+  @IsOptional() @IsInt() @Min(0) bookingEditHours?: number;
 }
 
 @Injectable()
 class SettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rent: RentService,
+  ) {}
 
   get() {
     return this.prisma.siteSettings.upsert({
@@ -47,12 +56,19 @@ class SettingsService {
     });
   }
 
-  update(dto: UpdateSettingsDto) {
-    return this.prisma.siteSettings.upsert({
+  async update(dto: UpdateSettingsDto) {
+    const saved = await this.prisma.siteSettings.upsert({
       where: { id: 1 },
       update: dto,
       create: { id: 1, ...dto },
     });
+    const touchesRent =
+      dto.rentPricePerHour !== undefined ||
+      dto.rentDayStart !== undefined ||
+      dto.rentDayEnd !== undefined ||
+      dto.rentBufferMin !== undefined;
+    if (touchesRent) await this.rent.syncRange();
+    return saved;
   }
 
   setAgreement(url: string) {
@@ -139,6 +155,7 @@ class SettingsController {
 }
 
 @Module({
+  imports: [RentModule],
   providers: [SettingsService],
   controllers: [SettingsController],
 })

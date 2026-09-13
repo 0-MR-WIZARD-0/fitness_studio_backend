@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import {
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
   Injectable,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   UseGuards,
@@ -22,6 +22,8 @@ import {
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedGuard } from '../auth/guards';
+import { RentModule, RentService } from '../rent/rent.module';
+import { IdPipe } from '../common/id.pipe';
 
 class UpsertAnnouncementDto {
   @IsString() title: string;
@@ -37,7 +39,10 @@ class UpsertAnnouncementDto {
 
 @Injectable()
 class AnnouncementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rent: RentService,
+  ) {}
 
   private withTrainer<
     T extends { trainer?: { name: string } | null; trainerId: number | null },
@@ -77,19 +82,48 @@ class AnnouncementsService {
     };
   }
 
-  create(dto: UpsertAnnouncementDto) {
-    return this.prisma.announcement.create({ data: this.data(dto) });
+  private async ensureNotRented(dto: UpsertAnnouncementDto) {
+    const startsAt = new Date(dto.startsAt);
+    const endsAt = new Date(
+      startsAt.getTime() + (dto.durationMin ?? 60) * 60000,
+    );
+    const rental = await this.rent.findBlockingRental(startsAt, endsAt);
+    if (rental) {
+      const when = rental.startsAt.toLocaleString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      throw new ConflictException(
+        `На это время студия сдана в аренду (${when}) — анонс поставить нельзя`,
+      );
+    }
   }
 
-  update(id: number, dto: UpsertAnnouncementDto) {
-    return this.prisma.announcement.update({
+  async create(dto: UpsertAnnouncementDto) {
+    await this.ensureNotRented(dto);
+    const item = await this.prisma.announcement.create({ data: this.data(dto) });
+    await this.rent.syncDay(item.startsAt);
+    return item;
+  }
+
+  async update(id: number, dto: UpsertAnnouncementDto) {
+    const before = await this.prisma.announcement.findUnique({ where: { id } });
+    await this.ensureNotRented(dto);
+    const item = await this.prisma.announcement.update({
       where: { id },
       data: this.data(dto),
     });
+    if (before) await this.rent.syncDay(before.startsAt);
+    await this.rent.syncDay(item.startsAt);
+    return item;
   }
 
   async remove(id: number) {
+    const item = await this.prisma.announcement.findUnique({ where: { id } });
     await this.prisma.announcement.delete({ where: { id } });
+    if (item) await this.rent.syncDay(item.startsAt);
     return { ok: true };
   }
 
@@ -131,7 +165,7 @@ class AnnouncementsController {
   @UseGuards(AuthenticatedGuard)
   @Put(':id')
   update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', IdPipe) id: number,
     @Body() dto: UpsertAnnouncementDto,
   ) {
     return this.svc.update(id, dto);
@@ -139,12 +173,13 @@ class AnnouncementsController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', IdPipe) id: number) {
     return this.svc.remove(id);
   }
 }
 
 @Module({
+  imports: [RentModule],
   providers: [AnnouncementsService],
   controllers: [AnnouncementsController],
 })

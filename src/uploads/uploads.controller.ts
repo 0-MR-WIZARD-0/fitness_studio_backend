@@ -4,7 +4,7 @@ import {
   Controller,
   Delete,
   Post,
-  Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -17,6 +17,7 @@ import { randomBytes } from 'crypto';
 import type { Request } from 'express';
 import { IsString } from 'class-validator';
 import { AuthenticatedGuard } from '../auth/guards';
+import { RateLimit } from '../common/rate-limit.guard';
 
 const UPLOAD_ROOT = './uploads';
 const FOLDERS = [
@@ -28,6 +29,7 @@ const FOLDERS = [
   'announcements',
   'reviews',
   'trainers',
+  'studio',
   'misc',
 ];
 
@@ -39,14 +41,20 @@ class DeleteDto {
   @IsString() url: string;
 }
 
+function folderFor(req: Request): string {
+  const isAdmin = req.isAuthenticated?.() ?? false;
+  return isAdmin ? safeFolder(req.query.folder as string | undefined) : 'reviews';
+}
+
 @Controller('uploads')
 export class UploadsController {
+  @UseGuards(RateLimit(10, 10 * 60_000, 'Слишком много загрузок'))
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (req: Request, _file, cb) => {
-          const folder = safeFolder(req.query.folder as string | undefined);
+          const folder = folderFor(req);
           const dir = join(UPLOAD_ROOT, folder);
           if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
           cb(null, dir);
@@ -68,11 +76,11 @@ export class UploadsController {
   )
   upload(
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Query('folder') folder?: string,
+    @Req() req: Request,
   ): { url: string; mediaType: 'IMAGE' | 'VIDEO' } {
     if (!file) throw new BadRequestException('Файл не передан');
     return {
-      url: `/uploads/${safeFolder(folder)}/${file.filename}`,
+      url: `/uploads/${folderFor(req)}/${file.filename}`,
       mediaType: file.mimetype.startsWith('video/') ? 'VIDEO' : 'IMAGE',
     };
   }

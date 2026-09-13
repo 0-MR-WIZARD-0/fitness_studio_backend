@@ -8,11 +8,15 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthenticatedGuard, LocalAuthGuard } from './guards';
+import { RateLimit } from '../common/rate-limit.guard';
 import { SessionAdmin } from './auth.service';
 
 @Controller('auth')
 export class AuthController {
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(
+    RateLimit(10, 5 * 60_000, 'Слишком много попыток входа'),
+    LocalAuthGuard,
+  )
   @Post('login')
   login(@Req() req: Request): { user: SessionAdmin } {
     return { user: req.user as SessionAdmin };

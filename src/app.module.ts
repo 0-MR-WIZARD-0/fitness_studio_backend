@@ -17,6 +17,10 @@ import { MailModule } from './mail/mail.module';
 import { SurveyModule } from './survey/survey.module';
 import { TrainersModule } from './trainers/trainers.module';
 import { RentModule } from './rent/rent.module';
+import { AccountModule } from './account/account.module';
+import { DocumentsModule } from './documents/documents.module';
+import { ServicesModule } from './services/services.module';
+import { HallsModule } from './halls/halls.module';
 
 @Module({
   imports: [
@@ -40,6 +44,10 @@ import { RentModule } from './rent/rent.module';
     SurveyModule,
     TrainersModule,
     RentModule,
+    AccountModule,
+    DocumentsModule,
+    ServicesModule,
+    HallsModule,
   ],
 })
 export class AppModule {}

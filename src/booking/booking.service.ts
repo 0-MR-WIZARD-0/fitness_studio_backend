@@ -14,16 +14,19 @@ import { courseGroups } from './course';
 import { MailService } from '../mail/mail.service';
 import { AuthService } from '../auth/auth.service';
 import { RentService } from '../rent/rent.module';
+import { DocumentsService } from '../documents/documents.module';
 import {
   AnnouncementBookingDto,
   CartBookingDto,
   CreateSlotDto,
   CreateWeekdaySlotsDto,
+  RemoveSlotDto,
   SingleBookingDto,
   UpdateSlotDto,
 } from './dto';
 
 const MS_DAY = 86400000;
+const ACTIVE_BOOKINGS = { status: { not: 'CANCELLED' as const } };
 
 @Injectable()
 export class BookingService {
@@ -33,7 +36,14 @@ export class BookingService {
     private readonly mail: MailService,
     private readonly auth: AuthService,
     private readonly rent: RentService,
+    private readonly documents: DocumentsService,
   ) {}
+
+  private async client(userId: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Войдите в личный кабинет');
+    return user;
+  }
 
   async availableSlots(formatId?: number) {
     return this.mapAvailable({
@@ -50,7 +60,6 @@ export class BookingService {
     const s = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
     return {
       single: s?.pricePerSession ?? 5000,
-      course: s?.priceCourse ?? 4000,
       threshold: Math.max(1, s?.courseThreshold ?? 3),
     };
   }
@@ -63,7 +72,8 @@ export class BookingService {
       include: {
         format: true,
         trainer: true,
-        _count: { select: { bookings: true } },
+        hall: true,
+        _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
       },
     });
     return slots.map((s) => ({
@@ -76,6 +86,8 @@ export class BookingService {
       formatName: s.format?.name ?? null,
       trainerId: s.trainerId,
       trainerName: s.trainer?.name ?? null,
+      hallId: s.hallId,
+      hallName: s.hall?.title ?? null,
       pricePerSession: s.isDiagnostic ? 0 : single,
       taken: s._count.bookings,
       remaining: Math.max(0, s.capacity - s._count.bookings),
@@ -88,8 +100,9 @@ export class BookingService {
       include: {
         format: true,
         trainer: true,
-        bookings: true,
-        _count: { select: { bookings: true } },
+        hall: true,
+        bookings: { where: ACTIVE_BOOKINGS },
+        _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
       },
     });
   }
@@ -103,19 +116,22 @@ export class BookingService {
     const startsAt = new Date(dto.startsAt);
     const durationMin =
       dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
-    await this.ensureNotRented(startsAt, durationMin);
+    await this.ensureNotRented(startsAt, durationMin, dto.hallId ?? null);
     await this.ensureTrainerFree(dto.trainerId ?? null, startsAt, durationMin);
 
-    return this.prisma.slot.create({
+    const slot = await this.prisma.slot.create({
       data: {
         formatId: dto.isDiagnostic ? null : dto.formatId,
         trainerId: dto.trainerId ?? null,
+        hallId: dto.hallId ?? null,
         startsAt,
         durationMin,
         capacity: dto.capacity ?? 7,
         isDiagnostic: dto.isDiagnostic ?? false,
       },
     });
+    await this.rent.syncDay(startsAt);
+    return slot;
   }
 
   async createWeekdaySlots(dto: CreateWeekdaySlotsDto) {
@@ -132,6 +148,7 @@ export class BookingService {
     const data: {
       formatId: number | null;
       trainerId: number | null;
+      hallId: number | null;
       startsAt: Date;
       durationMin: number;
       capacity: number;
@@ -146,6 +163,7 @@ export class BookingService {
       data.push({
         formatId: dto.isDiagnostic ? null : (dto.formatId as number),
         trainerId: dto.trainerId ?? null,
+        hallId: dto.hallId ?? null,
         startsAt: new Date(d),
         durationMin,
         capacity: dto.capacity ?? 7,
@@ -158,7 +176,12 @@ export class BookingService {
     const free: typeof data = [];
     for (const item of data) {
       const endsAt = new Date(item.startsAt.getTime() + item.durationMin * 60000);
-      const rented = await this.rent.findRentalOverlap(item.startsAt, endsAt);
+      const rented = await this.rent.findBlockingRental(
+        item.startsAt,
+        endsAt,
+        undefined,
+        item.hallId,
+      );
       const busy = await this.trainerBusy(
         item.trainerId,
         item.startsAt,
@@ -173,6 +196,8 @@ export class BookingService {
       );
 
     await this.prisma.slot.createMany({ data: free });
+    for (const day of new Set(free.map((i) => i.startsAt.toDateString())))
+      await this.rent.syncDay(new Date(day));
     return { created: free.length, skipped };
   }
 
@@ -196,25 +221,57 @@ export class BookingService {
 
     const trainerId =
       dto.trainerId !== undefined ? dto.trainerId : slot.trainerId;
-    await this.ensureNotRented(startsAt, slot.durationMin);
+    await this.ensureNotRented(startsAt, slot.durationMin, slot.hallId);
     await this.ensureTrainerFree(trainerId, startsAt, slot.durationMin, id);
 
-    return this.prisma.slot.update({
+    const updated = await this.prisma.slot.update({
       where: { id },
       data: {
         startsAt,
         ...(dto.trainerId !== undefined ? { trainerId: dto.trainerId } : {}),
       },
     });
+
+    if (isReschedule) {
+      await this.rent.syncDay(slot.startsAt);
+      await this.rent.syncDay(startsAt);
+    }
+    return updated;
   }
 
-  async removeSlot(id: number) {
-    await this.getSlot(id);
+  async removeSlot(id: number, dto: RemoveSlotDto = {}, adminUsername?: string) {
+    const slot = await this.prisma.slot.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
+      },
+    });
+    if (!slot) throw new NotFoundException('Слот не найден');
+
+    if (slot._count.bookings > 0) {
+      if (!dto.notified)
+        throw new BadRequestException(
+          'Подтвердите, что клиенты уведомлены об отмене занятия',
+        );
+      const admin = dto.password
+        ? await this.auth.validateAdmin(adminUsername ?? '', dto.password)
+        : null;
+      if (!admin) throw new UnauthorizedException('Неверный пароль');
+
+      await this.prisma.booking.updateMany({
+        where: { slotId: id },
+        data: { status: 'CANCELLED' },
+      });
+    }
+
     await this.prisma.slot.delete({ where: { id } });
-    return { ok: true };
+    await this.rent.syncDay(slot.startsAt);
+    return { ok: true, cancelled: slot._count.bookings };
   }
 
-  async bookSingle(dto: SingleBookingDto) {
+  async bookSingle(dto: SingleBookingDto, userId: number) {
+    const user = await this.client(userId);
+    await this.documents.ensureAccepted(dto.documentIds);
     const { single } = await this.prices();
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
@@ -227,7 +284,10 @@ export class BookingService {
     const result = await this.prisma.$transaction(async (tx) => {
       const slot = await tx.slot.findUnique({
         where: { id: dto.slotId },
-        include: { format: true, _count: { select: { bookings: true } } },
+        include: {
+          format: true,
+          _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
+        },
       });
       if (!slot) throw new NotFoundException('Слот не найден');
       if (slot.startsAt.getTime() < Date.now())
@@ -248,11 +308,12 @@ export class BookingService {
 
       const booking = await tx.booking.create({
         data: {
+          userId: user.id,
           slotId: slot.id,
           formatId: slot.formatId,
-          name: dto.name,
-          phone: dto.phone,
-          email: dto.email,
+          name: user.name,
+          phone: user.phone,
+          email: user.email,
           isDiagnostic: slot.isDiagnostic,
           price,
           isFree: free,
@@ -266,14 +327,19 @@ export class BookingService {
     return this.payment(result.booking.id, result.free, result.price);
   }
 
-  async bookCart(dto: CartBookingDto) {
+  async bookCart(dto: CartBookingDto, userId: number) {
+    const user = await this.client(userId);
+    await this.documents.ensureAccepted(dto.documentIds);
     const ids = [...new Set(dto.slotIds)];
-    const { single, course, threshold } = await this.prices();
+    const { single, threshold } = await this.prices();
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       const slots = await tx.slot.findMany({
         where: { id: { in: ids }, isDiagnostic: false },
-        include: { format: true, _count: { select: { bookings: true } } },
+        include: {
+          format: true,
+          _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
+        },
       });
       if (slots.length !== ids.length)
         throw new NotFoundException('Некоторые занятия не найдены');
@@ -296,34 +362,47 @@ export class BookingService {
 
       let total = 0;
       for (const s of slots) {
-        // занятия, вошедшие в курс, считаются по курсовой цене
-        const price = countedIds.has(s.id) ? course : single;
+        const price = single;
         total += price;
         await tx.booking.create({
           data: {
+            userId: user.id,
             slotId: s.id,
             formatId: s.formatId,
-            name: dto.name,
-            phone: dto.phone,
-            email: dto.email,
+            name: user.name,
+            phone: user.phone,
+            email: user.email,
             isCourse: countedIds.has(s.id),
             courseGroupId: groupIdBySlot.get(s.id) ?? null,
             price,
           },
         });
       }
-      return { courses: groups.length, total };
+      return {
+        courses: groups.length,
+        groupIds: [...new Set(groupIdBySlot.values())],
+        total,
+      };
     });
 
     const giftCodes: string[] = [];
-    for (let i = 0; i < outcome.courses; i += 1) {
+    for (const groupId of outcome.groupIds) {
       const gift = await this.promo.createGift({
-        name: dto.name,
-        phone: dto.phone,
-        email: dto.email,
+        userId: user.id,
+        courseGroupId: groupId,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
       });
       giftCodes.push(gift.code);
-      await this.mail.sendGiftCode(dto.email, gift.code);
+      await this.mail.sendGiftCode(user.email, gift.code);
+      await this.prisma.courseFreeze.create({
+        data: {
+          userId: user.id,
+          courseGroupId: groupId,
+          expiresAt: new Date(Date.now() + 30 * MS_DAY),
+        },
+      });
     }
 
     return {
@@ -338,7 +417,9 @@ export class BookingService {
     };
   }
 
-  async bookAnnouncement(dto: AnnouncementBookingDto) {
+  async bookAnnouncement(dto: AnnouncementBookingDto, userId: number) {
+    const user = await this.client(userId);
+    await this.documents.ensureAccepted(dto.documentIds);
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
       : null;
@@ -350,7 +431,9 @@ export class BookingService {
     const result = await this.prisma.$transaction(async (tx) => {
       const a = await tx.announcement.findUnique({
         where: { id: dto.announcementId },
-        include: { _count: { select: { bookings: true } } },
+        include: {
+          _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
+        },
       });
       if (!a) throw new NotFoundException('Анонс не найден');
       if (a._count.bookings >= a.capacity)
@@ -366,10 +449,11 @@ export class BookingService {
 
       const booking = await tx.booking.create({
         data: {
+          userId: user.id,
           announcementId: a.id,
-          name: dto.name,
-          phone: dto.phone,
-          email: dto.email,
+          name: user.name,
+          phone: user.phone,
+          email: user.email,
           price,
           isFree: free,
           promoCodeId: promo?.id,
@@ -381,6 +465,31 @@ export class BookingService {
     return this.payment(result.booking.id, result.free, result.price);
   }
 
+  async moveClientBooking(bookingId: number, slotId: number) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { slot: true },
+    });
+    if (!booking) throw new NotFoundException('Запись не найдена');
+    if (!booking.slotId)
+      throw new BadRequestException('Эту запись перенести нельзя');
+
+    const target = await this.prisma.slot.findUnique({
+      where: { id: slotId },
+      include: {
+        _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
+      },
+    });
+    if (!target) throw new NotFoundException('Занятие не найдено');
+    if (target._count.bookings >= target.capacity)
+      throw new ConflictException('На это занятие мест нет');
+
+    return this.prisma.booking.update({
+      where: { id: bookingId },
+      data: { slotId: target.id, status: 'PENDING' },
+    });
+  }
+
   listBookings() {
     return this.prisma.booking.findMany({
       orderBy: { createdAt: 'desc' },
@@ -388,7 +497,10 @@ export class BookingService {
         slot: true,
         format: true,
         announcement: true,
+        rentalSlot: { include: { service: { select: { title: true } } } },
+        service: true,
         promoCode: true,
+        user: { select: { id: true, email: true } },
       },
     });
   }
@@ -419,9 +531,18 @@ export class BookingService {
     return t;
   }
 
-  private async ensureNotRented(startsAt: Date, durationMin: number) {
+  private async ensureNotRented(
+    startsAt: Date,
+    durationMin: number,
+    hallId: number | null = null,
+  ) {
     const endsAt = new Date(startsAt.getTime() + durationMin * 60000);
-    const rental = await this.rent.findRentalOverlap(startsAt, endsAt);
+    const rental = await this.rent.findBlockingRental(
+      startsAt,
+      endsAt,
+      undefined,
+      hallId,
+    );
     if (rental) {
       const when = rental.startsAt.toLocaleString('ru-RU', {
         day: 'numeric',

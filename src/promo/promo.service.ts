@@ -39,7 +39,13 @@ export class PromoService {
     throw new Error('Не удалось сгенерировать промокод');
   }
 
-  async createGift(data: { name: string; phone: string; email?: string }) {
+  async createGift(data: {
+    userId?: number;
+    courseGroupId?: string;
+    name: string;
+    phone: string;
+    email?: string;
+  }) {
     for (let i = 0; i < 5; i++) {
       const code = this.genCode();
       const exists = await this.prisma.promoCode.findUnique({

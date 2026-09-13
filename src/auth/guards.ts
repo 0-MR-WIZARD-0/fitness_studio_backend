@@ -15,6 +15,12 @@ export class LocalAuthGuard extends AuthGuard('local') {
     await super.logIn(request);
     return result;
   }
+
+  handleRequest<TUser>(err: unknown, user: TUser): TUser {
+    if (err instanceof Error) throw err;
+    if (!user) throw new UnauthorizedException('Неверный логин или пароль');
+    return user;
+  }
 }
 
 @Injectable()

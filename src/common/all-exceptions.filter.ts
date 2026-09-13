@@ -25,6 +25,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof r === 'string'
           ? r
           : ((r as { message?: string | string[] }).message ?? message);
+      if (typeof message === 'string' && /^Cannot (GET|POST|PUT|DELETE|PATCH)/.test(message))
+        message = 'Адрес не найден';
+      if (message === 'Unauthorized') message = 'Требуется вход';
+      if (message === 'Forbidden') message = 'Доступ запрещён';
+      if (message === 'Internal Server Error') message = 'Внутренняя ошибка сервера';
     } else if (this.isPrismaError(exception)) {
       const mapped = this.mapPrisma(exception.code);
       status = mapped.status;

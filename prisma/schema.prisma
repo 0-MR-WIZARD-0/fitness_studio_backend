@@ -14,6 +14,41 @@ model Admin {
   createdAt    DateTime @default(now())
 }
 
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  bookings   Booking[]
+  promoCodes PromoCode[]
+  freezes    CourseFreeze[]
+}
+
+model CourseFreeze {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseGroupId String
+  bookingId     Int?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  usedAt        DateTime?
+}
+
+model StudioDocument {
+  id        Int      @id @default(autoincrement())
+  title     String
+  fileUrl   String
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Session {
   sid    String   @id
   sess   Json
@@ -187,6 +222,54 @@ model Slot {
   trainerId Int?
   trainer   Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
 
+  hallId Int?
+  hall   Hall? @relation(fields: [hallId], references: [id], onDelete: SetNull)
+
+  bookings Booking[]
+}
+
+model StudioPhoto {
+  id        Int      @id @default(autoincrement())
+  url       String
+  caption   String   @default("")
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Hall {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String   @default("")
+  priceSingle Int      @default(0)
+  price4      Int      @default(0)
+  price8      Int      @default(0)
+  price12     Int      @default(0)
+  isMain      Boolean  @default(false)
+  bookingUrl  String   @default("")
+  dayStart    String   @default("09:00")
+  dayEnd      String   @default("17:30")
+  bufferMin   Int      @default(30)
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  slots   RentalSlot[]
+  lessons Slot[]
+}
+
+model Service {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String   @default("")
+  price       Int      @default(0)
+  durationMin Int?
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  slots    RentalSlot[]
   bookings Booking[]
 }
 
@@ -197,14 +280,23 @@ model RentalSlot {
   price     Int      @default(0)
   comment   String   @default("")
   isActive  Boolean  @default(true)
+  isAuto    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  serviceId Int?
+  service   Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  hallId Int?
+  hall   Hall? @relation(fields: [hallId], references: [id], onDelete: Cascade)
 
   bookings Booking[]
 }
 
 model Booking {
   id             Int           @id @default(autoincrement())
+  userId         Int?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   slotId         Int?
   slot           Slot?         @relation(fields: [slotId], references: [id], onDelete: SetNull)
   formatId       Int?
@@ -213,6 +305,8 @@ model Booking {
   announcement   Announcement? @relation(fields: [announcementId], references: [id], onDelete: SetNull)
   rentalSlotId   Int?
   rentalSlot     RentalSlot?   @relation(fields: [rentalSlotId], references: [id], onDelete: SetNull)
+  serviceId      Int?
+  service        Service?      @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   promoCodeId    Int?
   promoCode      PromoCode?    @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
   name           String
@@ -237,6 +331,9 @@ model PromoCode {
   code      String    @unique
   kind      PromoKind @default(GENERIC)
   isUsed    Boolean   @default(false)
+  courseGroupId String?
+  userId    Int?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   name      String?
   phone     String?
   email     String?
@@ -276,5 +373,11 @@ model SiteSettings {
   userAgreementUrl String   @default("")
   telegramUrl      String   @default("")
   maxUrl           String   @default("")
+  rentPricePerHour Int      @default(3000)
+  rentDayStart     String   @default("09:00")
+  rentDayEnd       String   @default("17:30")
+  rentBufferMin    Int      @default(30)
+  bookingEditHours Int      @default(4)
+  courseCancelHours Int     @default(12)
   updatedAt        DateTime @updatedAt
 }

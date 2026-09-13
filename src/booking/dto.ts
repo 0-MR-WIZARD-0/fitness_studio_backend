@@ -3,7 +3,6 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEmail,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -15,6 +14,7 @@ import {
 export class CreateSlotDto {
   @IsOptional() @IsInt() formatId?: number;
   @IsOptional() @IsInt() trainerId?: number | null;
+  @IsOptional() @IsInt() hallId?: number | null;
   @IsDateString() startsAt: string;
   @IsOptional() @IsInt() durationMin?: number;
   @IsOptional() @IsInt() @Min(1) capacity?: number;
@@ -24,6 +24,7 @@ export class CreateSlotDto {
 export class CreateWeekdaySlotsDto {
   @IsOptional() @IsInt() formatId?: number;
   @IsOptional() @IsInt() trainerId?: number | null;
+  @IsOptional() @IsInt() hallId?: number | null;
   @Matches(/^\d{2}:\d{2}$/, { message: 'Время в формате HH:MM' })
   time: string;
   @IsInt() @Min(1) weeks: number;
@@ -40,25 +41,28 @@ export class UpdateSlotDto {
   @IsOptional() @IsBoolean() notified?: boolean;
 }
 
+export class MoveClientBookingDto {
+  @IsInt() slotId: number;
+}
+
+export class RemoveSlotDto {
+  @IsOptional() @IsString() password?: string;
+  @IsOptional() @IsBoolean() notified?: boolean;
+}
+
 export class SingleBookingDto {
   @IsInt() slotId: number;
-  @IsString() @IsNotEmpty({ message: 'Укажите ФИО' }) name: string;
-  @IsString() @IsNotEmpty({ message: 'Укажите телефон' }) phone: string;
-  @IsEmail({}, { message: 'Укажите корректный email' }) email: string;
   @IsOptional() @IsString() promoCode?: string;
+  @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
 }
 
 export class CartBookingDto {
   @IsArray() @ArrayNotEmpty() @IsInt({ each: true }) slotIds: number[];
-  @IsString() @IsNotEmpty({ message: 'Укажите ФИО' }) name: string;
-  @IsString() @IsNotEmpty({ message: 'Укажите телефон' }) phone: string;
-  @IsEmail({}, { message: 'Укажите корректный email' }) email: string;
+  @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
 }
 
 export class AnnouncementBookingDto {
   @IsInt() announcementId: number;
-  @IsString() @IsNotEmpty({ message: 'Укажите ФИО' }) name: string;
-  @IsString() @IsNotEmpty({ message: 'Укажите телефон' }) phone: string;
-  @IsEmail({}, { message: 'Укажите корректный email' }) email: string;
   @IsOptional() @IsString() promoCode?: string;
+  @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
 }

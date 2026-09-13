@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   Query,
@@ -14,6 +13,8 @@ import { AuthenticatedGuard } from '../auth/guards';
 import { ReviewsService } from './reviews.service';
 import { CreateReviewDto, ModerateReviewDto } from './dto';
 import { ReviewStatus } from '../generated/prisma/enums';
+import { IdPipe } from '../common/id.pipe';
+import { RateLimit } from '../common/rate-limit.guard';
 
 @Controller('reviews')
 export class ReviewsController {
@@ -24,6 +25,7 @@ export class ReviewsController {
     return this.reviews.listApproved();
   }
 
+  @UseGuards(RateLimit(5, 60 * 60_000, 'Слишком много отзывов'))
   @Post()
   submit(@Body() dto: CreateReviewDto) {
     return this.reviews.submit(dto);
@@ -38,7 +40,7 @@ export class ReviewsController {
   @UseGuards(AuthenticatedGuard)
   @Put(':id/status')
   moderate(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', IdPipe) id: number,
     @Body() dto: ModerateReviewDto,
   ) {
     return this.reviews.moderate(id, dto);
@@ -46,7 +48,7 @@ export class ReviewsController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', IdPipe) id: number) {
     return this.reviews.remove(id);
   }
 }

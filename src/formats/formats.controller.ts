@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   UseGuards,
@@ -12,6 +11,7 @@ import {
 import { AuthenticatedGuard } from '../auth/guards';
 import { FormatsService } from './formats.service';
 import { UpsertFormatDto } from './dto';
+import { IdPipe } from '../common/id.pipe';
 
 @Controller('formats')
 export class FormatsController {
@@ -35,7 +35,7 @@ export class FormatsController {
 
   @UseGuards(AuthenticatedGuard)
   @Get('admin/:id')
-  byId(@Param('id', ParseIntPipe) id: number) {
+  byId(@Param('id', IdPipe) id: number) {
     return this.formats.getById(id);
   }
 
@@ -47,13 +47,13 @@ export class FormatsController {
 
   @UseGuards(AuthenticatedGuard)
   @Put(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpsertFormatDto) {
+  update(@Param('id', IdPipe) id: number, @Body() dto: UpsertFormatDto) {
     return this.formats.update(id, dto);
   }
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', IdPipe) id: number) {
     return this.formats.remove(id);
   }
 }

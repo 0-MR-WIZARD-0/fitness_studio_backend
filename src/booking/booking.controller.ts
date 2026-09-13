@@ -4,23 +4,27 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { AuthenticatedGuard } from '../auth/guards';
+import { UserGuard, currentUserId } from '../account/account.module';
 import { BookingService } from './booking.service';
 import {
   AnnouncementBookingDto,
   CartBookingDto,
   CreateSlotDto,
   CreateWeekdaySlotsDto,
+  MoveClientBookingDto,
+  RemoveSlotDto,
   SingleBookingDto,
   UpdateSlotDto,
 } from './dto';
+import { IdPipe } from '../common/id.pipe';
 
 @Controller('booking')
 export class BookingController {
@@ -36,19 +40,22 @@ export class BookingController {
     return this.booking.diagnosticSlots();
   }
 
+  @UseGuards(UserGuard)
   @Post('single')
-  bookSingle(@Body() dto: SingleBookingDto) {
-    return this.booking.bookSingle(dto);
+  bookSingle(@Body() dto: SingleBookingDto, @Req() req: Request) {
+    return this.booking.bookSingle(dto, currentUserId(req));
   }
 
+  @UseGuards(UserGuard)
   @Post('cart')
-  bookCart(@Body() dto: CartBookingDto) {
-    return this.booking.bookCart(dto);
+  bookCart(@Body() dto: CartBookingDto, @Req() req: Request) {
+    return this.booking.bookCart(dto, currentUserId(req));
   }
 
+  @UseGuards(UserGuard)
   @Post('announcement')
-  bookAnnouncement(@Body() dto: AnnouncementBookingDto) {
-    return this.booking.bookAnnouncement(dto);
+  bookAnnouncement(@Body() dto: AnnouncementBookingDto, @Req() req: Request) {
+    return this.booking.bookAnnouncement(dto, currentUserId(req));
   }
 
   @UseGuards(AuthenticatedGuard)
@@ -72,7 +79,7 @@ export class BookingController {
   @UseGuards(AuthenticatedGuard)
   @Put('slots/:id')
   updateSlot(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', IdPipe) id: number,
     @Body() dto: UpdateSlotDto,
     @Req() req: { user?: { username?: string } },
   ) {
@@ -81,8 +88,21 @@ export class BookingController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete('slots/:id')
-  removeSlot(@Param('id', ParseIntPipe) id: number) {
-    return this.booking.removeSlot(id);
+  removeSlot(
+    @Param('id', IdPipe) id: number,
+    @Body() dto: RemoveSlotDto,
+    @Req() req: { user?: { username?: string } },
+  ) {
+    return this.booking.removeSlot(id, dto, req.user?.username);
+  }
+
+  @UseGuards(AuthenticatedGuard)
+  @Post('admin/bookings/:id/move')
+  moveClientBooking(
+    @Param('id', IdPipe) id: number,
+    @Body() dto: MoveClientBookingDto,
+  ) {
+    return this.booking.moveClientBooking(id, dto.slotId);
   }
 
   @UseGuards(AuthenticatedGuard)

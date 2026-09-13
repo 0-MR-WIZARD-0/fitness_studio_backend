@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   UseGuards,
@@ -12,6 +11,7 @@ import {
 import { AuthenticatedGuard } from '../auth/guards';
 import { HomeService } from './home.service';
 import { UpdateHeroDto, UpsertFaqDto, UpsertStepDto } from './dto';
+import { IdPipe } from '../common/id.pipe';
 
 @Controller('home')
 export class HomeController {
@@ -52,13 +52,13 @@ export class HomeController {
 
   @UseGuards(AuthenticatedGuard)
   @Put('faq/:id')
-  updateFaq(@Param('id', ParseIntPipe) id: number, @Body() dto: UpsertFaqDto) {
+  updateFaq(@Param('id', IdPipe) id: number, @Body() dto: UpsertFaqDto) {
     return this.home.updateFaq(id, dto);
   }
 
   @UseGuards(AuthenticatedGuard)
   @Delete('faq/:id')
-  removeFaq(@Param('id', ParseIntPipe) id: number) {
+  removeFaq(@Param('id', IdPipe) id: number) {
     return this.home.removeFaq(id);
   }
 
@@ -77,7 +77,7 @@ export class HomeController {
   @UseGuards(AuthenticatedGuard)
   @Put('steps/:id')
   updateStep(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', IdPipe) id: number,
     @Body() dto: UpsertStepDto,
   ) {
     return this.home.updateStep(id, dto);
@@ -85,7 +85,7 @@ export class HomeController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete('steps/:id')
-  removeStep(@Param('id', ParseIntPipe) id: number) {
+  removeStep(@Param('id', IdPipe) id: number) {
     return this.home.removeStep(id);
   }
 }

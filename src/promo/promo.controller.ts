@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   UseGuards,
@@ -12,6 +11,7 @@ import {
 import { IsDateString, IsString } from 'class-validator';
 import { AuthenticatedGuard } from '../auth/guards';
 import { PromoService } from './promo.service';
+import { IdPipe } from '../common/id.pipe';
 
 class ValidateDto {
   @IsString() code: string;
@@ -46,7 +46,7 @@ export class PromoController {
   @UseGuards(AuthenticatedGuard)
   @Put(':id/expiry')
   updateExpiry(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', IdPipe) id: number,
     @Body() dto: UpdateExpiryDto,
   ) {
     return this.promo.updateExpiry(id, dto.expiresAt);
@@ -54,7 +54,7 @@ export class PromoController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', IdPipe) id: number) {
     return this.promo.remove(id);
   }
 }

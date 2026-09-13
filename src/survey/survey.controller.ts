@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   UseGuards,
@@ -12,6 +11,7 @@ import {
 import { AuthenticatedGuard } from '../auth/guards';
 import { SurveyService } from './survey.service';
 import { ImportConditionsDto, UpsertConditionDto } from './dto';
+import { IdPipe } from '../common/id.pipe';
 
 @Controller('survey')
 export class SurveyController {
@@ -43,7 +43,7 @@ export class SurveyController {
   @UseGuards(AuthenticatedGuard)
   @Put('conditions/:id')
   update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', IdPipe) id: number,
     @Body() dto: UpsertConditionDto,
   ) {
     return this.survey.update(id, dto);
@@ -51,7 +51,7 @@ export class SurveyController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete('conditions/:id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', IdPipe) id: number) {
     return this.survey.remove(id);
   }
 }

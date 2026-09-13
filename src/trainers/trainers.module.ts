@@ -7,7 +7,6 @@ import {
   Module,
   NotFoundException,
   Param,
-  ParseIntPipe,
   Post,
   Put,
   UseGuards,
@@ -15,6 +14,7 @@ import {
 import { IsBoolean, IsInt, IsOptional, IsString } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedGuard } from '../auth/guards';
+import { IdPipe } from '../common/id.pipe';
 
 class UpsertTrainerDto {
   @IsString() name: string;
@@ -80,13 +80,13 @@ class TrainersController {
 
   @UseGuards(AuthenticatedGuard)
   @Put(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpsertTrainerDto) {
+  update(@Param('id', IdPipe) id: number, @Body() dto: UpsertTrainerDto) {
     return this.trainers.update(id, dto);
   }
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', IdPipe) id: number) {
     return this.trainers.remove(id);
   }
 }
