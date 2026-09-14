@@ -379,5 +379,7 @@ model SiteSettings {
   rentBufferMin    Int      @default(30)
   bookingEditHours Int      @default(4)
   courseCancelHours Int     @default(12)
+  mapLat           Float?
+  mapLng           Float?
   updatedAt        DateTime @updatedAt
 }

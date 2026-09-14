@@ -6,6 +6,7 @@ import {
   Delete,
   Get,
   Injectable,
+  Logger,
   Post,
   Put,
   UploadedFile,
@@ -17,7 +18,14 @@ import { diskStorage } from 'multer';
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
 import { join, normalize } from 'path';
 import { randomBytes } from 'crypto';
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedGuard } from '../auth/guards';
 import { RentModule, RentService } from '../rent/rent.module';
@@ -39,10 +47,15 @@ class UpdateSettingsDto {
   @IsOptional() @IsString() rentDayEnd?: string;
   @IsOptional() @IsInt() @Min(0) rentBufferMin?: number;
   @IsOptional() @IsInt() @Min(0) bookingEditHours?: number;
+  @IsOptional() @IsInt() @Min(0) courseCancelHours?: number;
+  @IsOptional() @IsNumber() @Min(-90) @Max(90) mapLat?: number | null;
+  @IsOptional() @IsNumber() @Min(-180) @Max(180) mapLng?: number | null;
 }
 
 @Injectable()
 class SettingsService {
+  private readonly log = new Logger('Settings');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rent: RentService,
@@ -56,11 +69,47 @@ class SettingsService {
     });
   }
 
+  private async geocode(address: string) {
+    const query = address.trim();
+    if (!query) return null;
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(
+        query,
+      )}`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'fitstudio.website/1.0 (studio map pin)' },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!res.ok) return null;
+      const found = (await res.json()) as { lat?: string; lon?: string }[];
+      const lat = Number(found?.[0]?.lat);
+      const lng = Number(found?.[0]?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { lat, lng };
+    } catch {
+      this.log.warn(`Не удалось определить координаты для «${query}»`);
+      return null;
+    }
+  }
+
   async update(dto: UpdateSettingsDto) {
+    const before = await this.get();
+    const data = { ...dto };
+    const movedPoint =
+      (dto.mapLat !== undefined && dto.mapLat !== before.mapLat) ||
+      (dto.mapLng !== undefined && dto.mapLng !== before.mapLng);
+    if (!movedPoint && dto.address && dto.address !== before.address) {
+      const point = await this.geocode(dto.address);
+      if (point) {
+        data.mapLat = point.lat;
+        data.mapLng = point.lng;
+      }
+    }
+
     const saved = await this.prisma.siteSettings.upsert({
       where: { id: 1 },
-      update: dto,
-      create: { id: 1, ...dto },
+      update: data,
+      create: { id: 1, ...data },
     });
     const touchesRent =
       dto.rentPricePerHour !== undefined ||

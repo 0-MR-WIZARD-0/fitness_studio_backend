@@ -25,6 +25,12 @@ import { AuthenticatedGuard } from '../auth/guards';
 import { RentModule, RentService } from '../rent/rent.module';
 import { IdPipe } from '../common/id.pipe';
 
+const ACTIVE_BOOKINGS = { status: { not: 'CANCELLED' as const } };
+const WITH_COUNT = {
+  trainer: true,
+  _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
+} as const;
+
 class UpsertAnnouncementDto {
   @IsString() title: string;
   @IsOptional() @IsString() description?: string;
@@ -45,17 +51,27 @@ class AnnouncementsService {
   ) {}
 
   private withTrainer<
-    T extends { trainer?: { name: string } | null; trainerId: number | null },
+    T extends {
+      trainer?: { name: string } | null;
+      trainerId: number | null;
+      capacity: number;
+      _count: { bookings: number };
+    },
   >(item: T) {
-    const { trainer, ...rest } = item;
-    return { ...rest, trainerName: trainer?.name ?? null };
+    const { trainer, _count, ...rest } = item;
+    return {
+      ...rest,
+      trainerName: trainer?.name ?? null,
+      taken: _count.bookings,
+      remaining: Math.max(0, item.capacity - _count.bookings),
+    };
   }
 
   async listPublic() {
     const items = await this.prisma.announcement.findMany({
       where: { isActive: true, startsAt: { gte: new Date() } },
       orderBy: { startsAt: 'asc' },
-      include: { trainer: true },
+      include: WITH_COUNT,
     });
     return items.map((a) => this.withTrainer(a));
   }
@@ -63,7 +79,7 @@ class AnnouncementsService {
   async listAll() {
     const items = await this.prisma.announcement.findMany({
       orderBy: { startsAt: 'asc' },
-      include: { trainer: true },
+      include: WITH_COUNT,
     });
     return items.map((a) => this.withTrainer(a));
   }
@@ -103,7 +119,9 @@ class AnnouncementsService {
 
   async create(dto: UpsertAnnouncementDto) {
     await this.ensureNotRented(dto);
-    const item = await this.prisma.announcement.create({ data: this.data(dto) });
+    const item = await this.prisma.announcement.create({
+      data: this.data(dto),
+    });
     await this.rent.syncDay(item.startsAt);
     return item;
   }
@@ -164,10 +182,7 @@ class AnnouncementsController {
 
   @UseGuards(AuthenticatedGuard)
   @Put(':id')
-  update(
-    @Param('id', IdPipe) id: number,
-    @Body() dto: UpsertAnnouncementDto,
-  ) {
+  update(@Param('id', IdPipe) id: number, @Body() dto: UpsertAnnouncementDto) {
     return this.svc.update(id, dto);
   }
 

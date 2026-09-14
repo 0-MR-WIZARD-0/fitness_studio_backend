@@ -290,7 +290,7 @@ export class AccountService {
           isCourse: b.isCourse,
           status: b.status,
           promoCode: b.promoCode?.code ?? null,
-        canMove: editable && kind === 'LESSON',
+          canMove: editable && kind === 'LESSON',
           canCancel: editable,
           canFreeze:
             editable &&
@@ -529,6 +529,10 @@ export class AccountService {
       throw new BadRequestException(
         'Переносить можно только на занятие того же формата',
       );
+    const twice = await this.prisma.booking.findFirst({
+      where: { slotId: target.id, userId, ...ACTIVE_BOOKINGS },
+    });
+    if (twice) throw new ConflictException('Вы уже записаны на это занятие');
 
     return this.prisma.booking.update({
       where: { id: bookingId },

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
+import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromoService } from '../promo/promo.service';
 import { courseGroups } from './course';
@@ -51,6 +52,36 @@ export class BookingService {
     if (!name) throw new BadRequestException('Укажите ФИО');
     if (!phone) throw new BadRequestException('Укажите телефон');
     return { id: null as number | null, name, phone, email: null };
+  }
+
+  private async ensureNotBooked(
+    tx: Prisma.TransactionClient,
+    where: { slotId: number } | { announcementId: number },
+    client: {
+      id: number | null;
+      name: string;
+      phone: string;
+      email: string | null;
+    },
+    what: string,
+  ) {
+    const existing = await tx.booking.findMany({
+      where: { ...where, ...ACTIVE_BOOKINGS },
+      select: { userId: true, name: true, phone: true, email: true },
+    });
+    const text = (value?: string | null) =>
+      (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const digits = (value?: string | null) =>
+      (value ?? '').replace(/\D/g, '').slice(-10);
+
+    const mine = existing.some(
+      (b) =>
+        (client.id !== null && b.userId === client.id) ||
+        (!!digits(client.phone) && digits(b.phone) === digits(client.phone)) ||
+        (!!text(client.email) && text(b.email) === text(client.email)) ||
+        (!!text(client.name) && text(b.name) === text(client.name)),
+    );
+    if (mine) throw new ConflictException(`Вы уже записаны на ${what}`);
   }
 
   async availableSlots(formatId?: number) {
@@ -183,7 +214,9 @@ export class BookingService {
     let skipped = 0;
     const free: typeof data = [];
     for (const item of data) {
-      const endsAt = new Date(item.startsAt.getTime() + item.durationMin * 60000);
+      const endsAt = new Date(
+        item.startsAt.getTime() + item.durationMin * 60000,
+      );
       const rented = await this.rent.findBlockingRental(
         item.startsAt,
         endsAt,
@@ -247,7 +280,11 @@ export class BookingService {
     return updated;
   }
 
-  async removeSlot(id: number, dto: RemoveSlotDto = {}, adminUsername?: string) {
+  async removeSlot(
+    id: number,
+    dto: RemoveSlotDto = {},
+    adminUsername?: string,
+  ) {
     const slot = await this.prisma.slot.findUnique({
       where: { id },
       include: {
@@ -323,6 +360,12 @@ export class BookingService {
       }
 
       const client = user ?? this.guest(dto);
+      await this.ensureNotBooked(
+        tx,
+        { slotId: slot.id },
+        client,
+        slot.isDiagnostic ? 'эту диагностику' : 'это занятие',
+      );
       const booking = await tx.booking.create({
         data: {
           userId: client.id,
@@ -368,6 +411,12 @@ export class BookingService {
           throw new ConflictException(
             `На занятие ${s.startsAt.toLocaleString('ru-RU')} нет мест`,
           );
+        await this.ensureNotBooked(
+          tx,
+          { slotId: s.id },
+          user,
+          `занятие ${s.startsAt.toLocaleString('ru-RU')}`,
+        );
       }
 
       const { groups, countedIds } = courseGroups(slots, threshold);
@@ -473,6 +522,7 @@ export class BookingService {
         });
 
       const client = user ?? this.guest(dto);
+      await this.ensureNotBooked(tx, { announcementId: a.id }, client, 'анонс');
       const booking = await tx.booking.create({
         data: {
           userId: client.id,
@@ -509,6 +559,18 @@ export class BookingService {
     if (!target) throw new NotFoundException('Занятие не найдено');
     if (target._count.bookings >= target.capacity)
       throw new ConflictException('На это занятие мест нет');
+    if (target.id !== booking.slotId)
+      await this.ensureNotBooked(
+        this.prisma,
+        { slotId: target.id },
+        {
+          id: booking.userId,
+          name: booking.name,
+          phone: booking.phone,
+          email: booking.email,
+        },
+        'это занятие',
+      );
 
     return this.prisma.booking.update({
       where: { id: bookingId },
