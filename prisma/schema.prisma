@@ -7,11 +7,25 @@ datasource db {
   provider = "postgresql"
 }
 
+enum AdminRole {
+  OWNER
+  TRAINER
+}
+
 model Admin {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
   passwordHash String
-  createdAt    DateTime @default(now())
+  role         AdminRole @default(OWNER)
+  createdAt    DateTime  @default(now())
+
+  trainerId Int?     @unique
+  trainer   Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+
+  slots         Slot[]
+  announcements Announcement[]
+  services      Service[]
+  promoCodes    PromoCode[]
 }
 
 model User {
@@ -206,6 +220,7 @@ model Trainer {
 
   slots         Slot[]
   announcements Announcement[]
+  admin         Admin?
 }
 
 model Slot {
@@ -226,6 +241,9 @@ model Slot {
   hall   Hall? @relation(fields: [hallId], references: [id], onDelete: SetNull)
 
   bookings Booking[]
+
+  createdById Int?
+  createdBy   Admin? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 }
 
 model StudioPhoto {
@@ -237,22 +255,22 @@ model StudioPhoto {
 }
 
 model Hall {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String   @default("")
-  priceSingle Int      @default(0)
-  price4      Int      @default(0)
-  price8      Int      @default(0)
-  price12     Int      @default(0)
-  isMain      Boolean  @default(false)
-  bookingUrl  String   @default("")
-  dayStart    String   @default("09:00")
-  dayEnd      String   @default("17:30")
-  bufferMin   Int      @default(30)
-  order       Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  title        String
+  description  String   @default("")
+  priceSingle  Int      @default(0)
+  price4       Int      @default(0)
+  price8       Int      @default(0)
+  price12      Int      @default(0)
+  autoSchedule Boolean  @default(false)
+  bookingUrl   String   @default("")
+  dayStart     String   @default("09:00")
+  dayEnd       String   @default("17:30")
+  bufferMin    Int      @default(30)
+  order        Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   slots   RentalSlot[]
   lessons Slot[]
@@ -271,6 +289,9 @@ model Service {
 
   slots    RentalSlot[]
   bookings Booking[]
+
+  createdById Int?
+  createdBy   Admin? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 }
 
 model RentalSlot {
@@ -327,21 +348,24 @@ enum PromoKind {
 }
 
 model PromoCode {
-  id        Int       @id @default(autoincrement())
-  code      String    @unique
-  kind      PromoKind @default(GENERIC)
-  isUsed    Boolean   @default(false)
+  id            Int       @id @default(autoincrement())
+  code          String    @unique
+  kind          PromoKind @default(GENERIC)
+  isUsed        Boolean   @default(false)
   courseGroupId String?
-  userId    Int?
-  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  name      String?
-  phone     String?
-  email     String?
-  createdAt DateTime  @default(now())
-  expiresAt DateTime  @default(now())
-  usedAt    DateTime?
+  userId        Int?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name          String?
+  phone         String?
+  email         String?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime  @default(now())
+  usedAt        DateTime?
 
   bookings Booking[]
+
+  createdById Int?
+  createdBy   Admin? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 }
 
 model Announcement {
@@ -360,26 +384,29 @@ model Announcement {
   trainer   Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
 
   bookings Booking[]
+
+  createdById Int?
+  createdBy   Admin? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 }
 
 model SiteSettings {
-  id               Int      @id @default(1)
-  address          String   @default("Малая Никитская ул., 8/1, Москва")
-  phone            String   @default("8-888-888-88-88")
-  email            String   @default("test@mail.ru")
-  courseThreshold  Int      @default(3)
-  pricePerSession  Int      @default(5000)
-  priceCourse      Int      @default(4000)
-  userAgreementUrl String   @default("")
-  telegramUrl      String   @default("")
-  maxUrl           String   @default("")
-  rentPricePerHour Int      @default(3000)
-  rentDayStart     String   @default("09:00")
-  rentDayEnd       String   @default("17:30")
-  rentBufferMin    Int      @default(30)
-  bookingEditHours Int      @default(4)
-  courseCancelHours Int     @default(12)
-  mapLat           Float?
-  mapLng           Float?
-  updatedAt        DateTime @updatedAt
+  id                Int      @id @default(1)
+  address           String   @default("Малая Никитская ул., 8/1, Москва")
+  phone             String   @default("8-888-888-88-88")
+  email             String   @default("test@mail.ru")
+  courseThreshold   Int      @default(3)
+  pricePerSession   Int      @default(5000)
+  priceCourse       Int      @default(4000)
+  userAgreementUrl  String   @default("")
+  telegramUrl       String   @default("")
+  maxUrl            String   @default("")
+  rentPricePerHour  Int      @default(3000)
+  rentDayStart      String   @default("09:00")
+  rentDayEnd        String   @default("17:30")
+  rentBufferMin     Int      @default(30)
+  bookingEditHours  Int      @default(4)
+  courseCancelHours Int      @default(12)
+  mapLat            Float?
+  mapLng            Float?
+  updatedAt         DateTime @updatedAt
 }

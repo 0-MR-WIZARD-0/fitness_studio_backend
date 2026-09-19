@@ -6,12 +6,23 @@ import {
   Param,
   Post,
   Put,
+  Req,
   UseGuards,
 } from '@nestjs/common';
-import { AuthenticatedGuard } from '../auth/guards';
+import type { Request } from 'express';
+import { IsString } from 'class-validator';
+import {
+  AuthenticatedGuard,
+  TrainerAllowed,
+  currentAdmin,
+} from '../auth/guards';
 import { FormatsService } from './formats.service';
 import { UpsertFormatDto } from './dto';
 import { IdPipe } from '../common/id.pipe';
+
+class RemoveFormatDto {
+  @IsString() password: string;
+}
 
 @Controller('formats')
 export class FormatsController {
@@ -28,6 +39,7 @@ export class FormatsController {
   }
 
   @UseGuards(AuthenticatedGuard)
+  @TrainerAllowed()
   @Get('admin/all')
   all() {
     return this.formats.listAll();
@@ -53,7 +65,11 @@ export class FormatsController {
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', IdPipe) id: number) {
-    return this.formats.remove(id);
+  remove(
+    @Param('id', IdPipe) id: number,
+    @Body() dto: RemoveFormatDto,
+    @Req() req: Request,
+  ) {
+    return this.formats.remove(id, currentAdmin(req).id, dto.password);
   }
 }

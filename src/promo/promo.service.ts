@@ -3,6 +3,8 @@ import { Cron } from '@nestjs/schedule';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromoKind } from '../generated/prisma/enums';
+import type { SessionAdmin } from '../auth/auth.service';
+import { assertOwnItem } from '../auth/guards';
 
 const PROMO_TTL_DAYS = 30;
 
@@ -25,7 +27,7 @@ export class PromoService {
     return d;
   }
 
-  async create() {
+  async create(admin: SessionAdmin) {
     for (let i = 0; i < 5; i++) {
       const code = this.genCode();
       const exists = await this.prisma.promoCode.findUnique({
@@ -33,7 +35,11 @@ export class PromoService {
       });
       if (!exists)
         return this.prisma.promoCode.create({
-          data: { code, expiresAt: this.defaultExpiry() },
+          data: {
+            code,
+            expiresAt: this.defaultExpiry(),
+            createdById: admin.id,
+          },
         });
     }
     throw new Error('Не удалось сгенерировать промокод');
@@ -68,16 +74,16 @@ export class PromoService {
     return this.prisma.promoCode.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
-  async updateExpiry(id: number, expiresAt: string) {
-    await this.ensure(id);
+  async updateExpiry(id: number, expiresAt: string, admin: SessionAdmin) {
+    assertOwnItem(admin, await this.ensure(id), 'промокоды');
     return this.prisma.promoCode.update({
       where: { id },
       data: { expiresAt: new Date(expiresAt) },
     });
   }
 
-  async remove(id: number) {
-    await this.ensure(id);
+  async remove(id: number, admin: SessionAdmin) {
+    assertOwnItem(admin, await this.ensure(id), 'промокоды');
     await this.prisma.promoCode.delete({ where: { id } });
     return { ok: true };
   }
@@ -103,5 +109,6 @@ export class PromoService {
   private async ensure(id: number) {
     const found = await this.prisma.promoCode.findUnique({ where: { id } });
     if (!found) throw new NotFoundException('Промокод не найден');
+    return found;
   }
 }

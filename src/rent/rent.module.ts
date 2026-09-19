@@ -34,7 +34,10 @@ import {
   UserGuard,
   currentUserId,
 } from '../account/account.module';
-import { DocumentsModule, DocumentsService } from '../documents/documents.module';
+import {
+  DocumentsModule,
+  DocumentsService,
+} from '../documents/documents.module';
 import { IdPipe } from '../common/id.pipe';
 
 class UpsertRentalSlotDto {
@@ -173,8 +176,7 @@ export class RentService {
     bufferMin?: number,
     hallId?: number | null,
   ) {
-    const buffer =
-      bufferMin ?? (await this.config()).bufferMin;
+    const buffer = bufferMin ?? (await this.config()).bufferMin;
     const from = startsAt.getTime();
     const to = endsAt.getTime();
     const since = new Date(from - MS_DAY);
@@ -209,8 +211,7 @@ export class RentService {
     return (
       busy.find((s) => {
         const bStart = s.startsAt.getTime() - buffer * MS_MIN;
-        const bEnd =
-          s.startsAt.getTime() + (s.durationMin + buffer) * MS_MIN;
+        const bEnd = s.startsAt.getTime() + (s.durationMin + buffer) * MS_MIN;
         return bStart < to && from < bEnd;
       }) ?? null
     );
@@ -308,13 +309,17 @@ export class RentService {
       return { created: 0, removed: 0 };
 
     const halls = await this.prisma.hall.findMany({
-      where: { isActive: true },
+      where: { isActive: true, autoSchedule: true },
       orderBy: [{ order: 'asc' }, { id: 'asc' }],
     });
-    const main = halls.find((h) => h.isMain);
-    if (halls.length > 0 && !main) return { created: 0, removed: 0 };
-
-    return this.syncHallDay(dayStart, main ?? null);
+    let created = 0;
+    let removed = 0;
+    for (const hall of halls) {
+      const res = await this.syncHallDay(dayStart, hall);
+      created += res.created;
+      removed += res.removed;
+    }
+    return { created, removed };
   }
 
   private async syncHallDay(
@@ -459,22 +464,19 @@ export class RentService {
     let created = 0;
     let removed = 0;
 
-    const halls = await this.prisma.hall.findMany({ where: { isActive: true } });
-    if (halls.length > 0) {
-      const main = halls.find((h) => h.isMain);
-      const stale = await this.prisma.rentalSlot.deleteMany({
-        where: {
-          isAuto: true,
-          isActive: true,
-          startsAt: { gte: start },
-          bookings: { none: ACTIVE_BOOKINGS },
-          ...(main
-            ? { OR: [{ hallId: null }, { hallId: { not: main.id } }] }
-            : {}),
-        },
-      });
-      removed += stale.count;
-    }
+    const auto = await this.prisma.hall.findMany({
+      where: { isActive: true, autoSchedule: true },
+      select: { id: true },
+    });
+    const stale = await this.prisma.rentalSlot.deleteMany({
+      where: {
+        isAuto: true,
+        startsAt: { gte: start },
+        bookings: { none: ACTIVE_BOOKINGS },
+        OR: [{ hallId: null }, { hallId: { notIn: auto.map((h) => h.id) } }],
+      },
+    });
+    removed += stale.count;
     for (let i = 0; i < days; i += 1) {
       const res = await this.syncDay(new Date(start.getTime() + i * MS_DAY));
       created += res.created;
@@ -540,7 +542,9 @@ export class RentService {
       },
     });
     await this.syncDay(before.startsAt);
-    if (startOfDay(startsAt).getTime() !== startOfDay(before.startsAt).getTime())
+    if (
+      startOfDay(startsAt).getTime() !== startOfDay(before.startsAt).getTime()
+    )
       await this.syncDay(startsAt);
     return this.map(slot);
   }
@@ -594,7 +598,10 @@ export class RentService {
         total: slot.price,
         payment:
           slot.price > 0
-            ? { status: 'mock', redirectUrl: `/payment/mock?total=${slot.price}` }
+            ? {
+                status: 'mock',
+                redirectUrl: `/payment/mock?total=${slot.price}`,
+              }
             : { status: 'free', redirectUrl: null },
       };
     });
@@ -602,7 +609,7 @@ export class RentService {
 
   photos() {
     return this.prisma.studioPhoto.findMany({
-      orderBy: [{ order: "asc" }, { id: "asc" }],
+      orderBy: [{ order: 'asc' }, { id: 'asc' }],
     });
   }
 
@@ -610,7 +617,7 @@ export class RentService {
     return this.prisma.studioPhoto.create({
       data: {
         url: dto.url,
-        caption: dto.caption ?? "",
+        caption: dto.caption ?? '',
         order: dto.order ?? 0,
       },
     });
@@ -679,10 +686,7 @@ class RentController {
 
   @UseGuards(AuthenticatedGuard)
   @Put('photos/:id')
-  updatePhoto(
-    @Param('id', IdPipe) id: number,
-    @Body() dto: UpsertPhotoDto,
-  ) {
+  updatePhoto(@Param('id', IdPipe) id: number, @Body() dto: UpsertPhotoDto) {
     return this.rent.updatePhoto(id, dto);
   }
 
@@ -715,10 +719,7 @@ class RentController {
 
   @UseGuards(AuthenticatedGuard)
   @Put('slots/:id')
-  update(
-    @Param('id', IdPipe) id: number,
-    @Body() dto: UpsertRentalSlotDto,
-  ) {
+  update(@Param('id', IdPipe) id: number, @Body() dto: UpsertRentalSlotDto) {
     return this.rent.update(id, dto);
   }
 

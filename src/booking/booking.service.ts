@@ -16,6 +16,8 @@ import { MailService } from '../mail/mail.service';
 import { AuthService } from '../auth/auth.service';
 import { RentService } from '../rent/rent.module';
 import { DocumentsService } from '../documents/documents.module';
+import type { SessionAdmin } from '../auth/auth.service';
+import { assertOwnItem } from '../auth/guards';
 import {
   AnnouncementBookingDto,
   CartBookingDto,
@@ -146,23 +148,25 @@ export class BookingService {
     });
   }
 
-  async createSlot(dto: CreateSlotDto) {
+  async createSlot(dto: CreateSlotDto, admin: SessionAdmin) {
     if (!dto.isDiagnostic && !dto.formatId)
       throw new BadRequestException('Для занятия нужен формат');
     const format = dto.formatId ? await this.ensureFormat(dto.formatId) : null;
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
+    const hall = await this.ensureHall(dto.hallId);
 
     const startsAt = new Date(dto.startsAt);
     const durationMin =
       dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
-    await this.ensureNotRented(startsAt, durationMin, dto.hallId ?? null);
+    await this.ensureNotRented(startsAt, durationMin, hall.id);
     await this.ensureTrainerFree(dto.trainerId ?? null, startsAt, durationMin);
 
     const slot = await this.prisma.slot.create({
       data: {
         formatId: dto.isDiagnostic ? null : dto.formatId,
         trainerId: dto.trainerId ?? null,
-        hallId: dto.hallId ?? null,
+        hallId: hall.id,
+        createdById: admin.id,
         startsAt,
         durationMin,
         capacity: dto.capacity ?? 7,
@@ -173,11 +177,12 @@ export class BookingService {
     return slot;
   }
 
-  async createWeekdaySlots(dto: CreateWeekdaySlotsDto) {
+  async createWeekdaySlots(dto: CreateWeekdaySlotsDto, admin: SessionAdmin) {
     if (!dto.isDiagnostic && !dto.formatId)
       throw new BadRequestException('Для занятия нужен формат');
     const format = dto.formatId ? await this.ensureFormat(dto.formatId) : null;
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
+    const hall = await this.ensureHall(dto.hallId);
     const durationMin =
       dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
     const [h, m] = dto.time.split(':').map(Number);
@@ -187,7 +192,8 @@ export class BookingService {
     const data: {
       formatId: number | null;
       trainerId: number | null;
-      hallId: number | null;
+      hallId: number;
+      createdById: number;
       startsAt: Date;
       durationMin: number;
       capacity: number;
@@ -202,7 +208,8 @@ export class BookingService {
       data.push({
         formatId: dto.isDiagnostic ? null : (dto.formatId as number),
         trainerId: dto.trainerId ?? null,
-        hallId: dto.hallId ?? null,
+        hallId: hall.id,
+        createdById: admin.id,
         startsAt: new Date(d),
         durationMin,
         capacity: dto.capacity ?? 7,
@@ -242,8 +249,9 @@ export class BookingService {
     return { created: free.length, skipped };
   }
 
-  async updateSlot(id: number, dto: UpdateSlotDto, adminUsername?: string) {
+  async updateSlot(id: number, dto: UpdateSlotDto, admin: SessionAdmin) {
     const slot = await this.getSlot(id);
+    assertOwnItem(admin, slot, 'занятия');
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
 
     const startsAt = new Date(dto.startsAt);
@@ -254,10 +262,8 @@ export class BookingService {
         throw new BadRequestException(
           'Подтвердите, что клиенты уведомлены о переносе',
         );
-      const admin = dto.password
-        ? await this.auth.validateAdmin(adminUsername ?? '', dto.password)
-        : null;
-      if (!admin) throw new UnauthorizedException('Неверный пароль');
+      if (!(await this.auth.checkPassword(admin.id, dto.password ?? '')))
+        throw new UnauthorizedException('Неверный пароль');
     }
 
     const trainerId =
@@ -280,11 +286,7 @@ export class BookingService {
     return updated;
   }
 
-  async removeSlot(
-    id: number,
-    dto: RemoveSlotDto = {},
-    adminUsername?: string,
-  ) {
+  async removeSlot(id: number, dto: RemoveSlotDto, admin: SessionAdmin) {
     const slot = await this.prisma.slot.findUnique({
       where: { id },
       include: {
@@ -292,16 +294,15 @@ export class BookingService {
       },
     });
     if (!slot) throw new NotFoundException('Слот не найден');
+    assertOwnItem(admin, slot, 'занятия');
 
     if (slot._count.bookings > 0) {
       if (!dto.notified)
         throw new BadRequestException(
           'Подтвердите, что клиенты уведомлены об отмене занятия',
         );
-      const admin = dto.password
-        ? await this.auth.validateAdmin(adminUsername ?? '', dto.password)
-        : null;
-      if (!admin) throw new UnauthorizedException('Неверный пароль');
+      if (!(await this.auth.checkPassword(admin.id, dto.password ?? '')))
+        throw new UnauthorizedException('Неверный пароль');
 
       await this.prisma.booking.updateMany({
         where: { slotId: id },
@@ -541,14 +542,19 @@ export class BookingService {
     return this.payment(result.booking.id, result.free, result.price);
   }
 
-  async moveClientBooking(bookingId: number, slotId: number) {
+  async moveClientBooking(
+    bookingId: number,
+    slotId: number,
+    admin: SessionAdmin,
+  ) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: { slot: true },
     });
     if (!booking) throw new NotFoundException('Запись не найдена');
-    if (!booking.slotId)
+    if (!booking.slotId || !booking.slot)
       throw new BadRequestException('Эту запись перенести нельзя');
+    assertOwnItem(admin, booking.slot, 'занятия');
 
     const target = await this.prisma.slot.findUnique({
       where: { id: slotId },
@@ -557,6 +563,7 @@ export class BookingService {
       },
     });
     if (!target) throw new NotFoundException('Занятие не найдено');
+    assertOwnItem(admin, target, 'занятия');
     if (target._count.bookings >= target.capacity)
       throw new ConflictException('На это занятие мест нет');
     if (target.id !== booking.slotId)
@@ -611,6 +618,18 @@ export class BookingService {
     const f = await this.prisma.format.findUnique({ where: { id } });
     if (!f) throw new NotFoundException('Формат не найден');
     return f;
+  }
+
+  private async ensureHall(hallId?: number | null) {
+    if (!hallId) {
+      const halls = await this.prisma.hall.count({ where: { isActive: true } });
+      throw new BadRequestException(
+        halls ? 'Выберите зал' : 'Сначала добавьте зал в разделе «Залы»',
+      );
+    }
+    const hall = await this.prisma.hall.findUnique({ where: { id: hallId } });
+    if (!hall || !hall.isActive) throw new NotFoundException('Зал не найден');
+    return hall;
   }
 
   private async ensureTrainer(id: number) {

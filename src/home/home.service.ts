@@ -29,12 +29,15 @@ export class HomeService {
   }
 
   createFaq(dto: UpsertFaqDto) {
-    return this.prisma.homeFaq.create({ data: dto });
+    return this.prisma.homeFaq.create({ data: { ...dto, isActive: true } });
   }
 
   async updateFaq(id: number, dto: UpsertFaqDto) {
     await this.ensureFaq(id);
-    return this.prisma.homeFaq.update({ where: { id }, data: dto });
+    return this.prisma.homeFaq.update({
+      where: { id },
+      data: { ...dto, isActive: true },
+    });
   }
 
   async removeFaq(id: number) {
@@ -56,12 +59,15 @@ export class HomeService {
   }
 
   createStep(dto: UpsertStepDto) {
-    return this.prisma.homeStep.create({ data: dto });
+    return this.prisma.homeStep.create({ data: { ...dto, isActive: true } });
   }
 
   async updateStep(id: number, dto: UpsertStepDto) {
     await this.ensureStep(id);
-    return this.prisma.homeStep.update({ where: { id }, data: dto });
+    return this.prisma.homeStep.update({
+      where: { id },
+      data: { ...dto, isActive: true },
+    });
   }
 
   async removeStep(id: number) {

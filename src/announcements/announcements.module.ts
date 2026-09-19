@@ -6,11 +6,14 @@ import {
   Delete,
   Get,
   Injectable,
+  NotFoundException,
   Param,
   Post,
   Put,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
@@ -21,7 +24,13 @@ import {
   IsString,
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthenticatedGuard } from '../auth/guards';
+import {
+  AuthenticatedGuard,
+  TrainerAllowed,
+  assertOwnItem,
+  currentAdmin,
+} from '../auth/guards';
+import type { SessionAdmin } from '../auth/auth.service';
 import { RentModule, RentService } from '../rent/rent.module';
 import { IdPipe } from '../common/id.pipe';
 
@@ -117,32 +126,40 @@ class AnnouncementsService {
     }
   }
 
-  async create(dto: UpsertAnnouncementDto) {
+  async create(dto: UpsertAnnouncementDto, admin: SessionAdmin) {
     await this.ensureNotRented(dto);
     const item = await this.prisma.announcement.create({
-      data: this.data(dto),
+      data: { ...this.data(dto), createdById: admin.id },
     });
     await this.rent.syncDay(item.startsAt);
     return item;
   }
 
-  async update(id: number, dto: UpsertAnnouncementDto) {
-    const before = await this.prisma.announcement.findUnique({ where: { id } });
+  async update(id: number, dto: UpsertAnnouncementDto, admin: SessionAdmin) {
+    const before = await this.ensure(id);
+    assertOwnItem(admin, before, 'анонсы');
     await this.ensureNotRented(dto);
     const item = await this.prisma.announcement.update({
       where: { id },
       data: this.data(dto),
     });
-    if (before) await this.rent.syncDay(before.startsAt);
+    await this.rent.syncDay(before.startsAt);
     await this.rent.syncDay(item.startsAt);
     return item;
   }
 
-  async remove(id: number) {
-    const item = await this.prisma.announcement.findUnique({ where: { id } });
+  async remove(id: number, admin: SessionAdmin) {
+    const item = await this.ensure(id);
+    assertOwnItem(admin, item, 'анонсы');
     await this.prisma.announcement.delete({ where: { id } });
-    if (item) await this.rent.syncDay(item.startsAt);
+    await this.rent.syncDay(item.startsAt);
     return { ok: true };
+  }
+
+  private async ensure(id: number) {
+    const found = await this.prisma.announcement.findUnique({ where: { id } });
+    if (!found) throw new NotFoundException('Анонс не найден');
+    return found;
   }
 
   @Cron('0 0 * * *')
@@ -159,6 +176,7 @@ class AnnouncementsService {
   }
 }
 
+@TrainerAllowed()
 @Controller('announcements')
 class AnnouncementsController {
   constructor(private readonly svc: AnnouncementsService) {}
@@ -176,20 +194,24 @@ class AnnouncementsController {
 
   @UseGuards(AuthenticatedGuard)
   @Post()
-  create(@Body() dto: UpsertAnnouncementDto) {
-    return this.svc.create(dto);
+  create(@Body() dto: UpsertAnnouncementDto, @Req() req: Request) {
+    return this.svc.create(dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
   @Put(':id')
-  update(@Param('id', IdPipe) id: number, @Body() dto: UpsertAnnouncementDto) {
-    return this.svc.update(id, dto);
+  update(
+    @Param('id', IdPipe) id: number,
+    @Body() dto: UpsertAnnouncementDto,
+    @Req() req: Request,
+  ) {
+    return this.svc.update(id, dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', IdPipe) id: number) {
-    return this.svc.remove(id);
+  remove(@Param('id', IdPipe) id: number, @Req() req: Request) {
+    return this.svc.remove(id, currentAdmin(req));
   }
 }
 

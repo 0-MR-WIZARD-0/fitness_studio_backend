@@ -9,13 +9,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { AuthenticatedGuard } from '../auth/guards';
+import { AuthenticatedGuard, TrainerAllowed } from '../auth/guards';
 import { ReviewsService } from './reviews.service';
 import { CreateReviewDto, ModerateReviewDto } from './dto';
 import { ReviewStatus } from '../generated/prisma/enums';
 import { IdPipe } from '../common/id.pipe';
 import { RateLimit } from '../common/rate-limit.guard';
 
+@TrainerAllowed()
 @Controller('reviews')
 export class ReviewsController {
   constructor(private readonly reviews: ReviewsService) {}
@@ -39,10 +40,7 @@ export class ReviewsController {
 
   @UseGuards(AuthenticatedGuard)
   @Put(':id/status')
-  moderate(
-    @Param('id', IdPipe) id: number,
-    @Body() dto: ModerateReviewDto,
-  ) {
+  moderate(@Param('id', IdPipe) id: number, @Body() dto: ModerateReviewDto) {
     return this.reviews.moderate(id, dto);
   }
 

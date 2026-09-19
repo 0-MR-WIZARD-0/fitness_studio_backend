@@ -1,14 +1,20 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthService } from '../auth/auth.service';
 import { ForWhomItemDto, MechanismDto, UpsertFormatDto } from './dto';
 
 @Injectable()
 export class FormatsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auth: AuthService,
+  ) {}
 
   listPublic() {
     return this.prisma.format.findMany({
@@ -17,8 +23,19 @@ export class FormatsService {
     });
   }
 
-  listAll() {
-    return this.prisma.format.findMany({ orderBy: { order: 'asc' } });
+  async listAll() {
+    const formats = await this.prisma.format.findMany({
+      orderBy: { order: 'asc' },
+      include: {
+        _count: {
+          select: { slots: { where: { startsAt: { gte: new Date() } } } },
+        },
+      },
+    });
+    return formats.map(({ _count, ...f }) => ({
+      ...f,
+      upcomingLessons: _count.slots,
+    }));
   }
 
   async getBySlug(slug: string) {
@@ -84,8 +101,17 @@ export class FormatsService {
     });
   }
 
-  async remove(id: number) {
+  async remove(id: number, adminId: number, password: string) {
     await this.getById(id);
+    const lessons = await this.prisma.slot.count({
+      where: { formatId: id, startsAt: { gte: new Date() } },
+    });
+    if (lessons)
+      throw new BadRequestException(
+        `На формат стоит ${lessons} занятий в расписании — сначала удалите или перенесите их`,
+      );
+    if (!(await this.auth.checkPassword(adminId, password)))
+      throw new UnauthorizedException('Неверный пароль');
     await this.prisma.format.delete({ where: { id } });
     return { ok: true };
   }
@@ -100,7 +126,7 @@ export class FormatsService {
       heroImageUrl: dto.heroImageUrl,
       durationMin: dto.durationMin,
       order: dto.order,
-      isActive: dto.isActive,
+      isActive: true,
     };
   }
 

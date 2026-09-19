@@ -31,21 +31,16 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RateLimit } from '../common/rate-limit.guard';
 import { IdPipe } from '../common/id.pipe';
+import { PASSWORD_RE, PASSWORD_RULE } from '../common/password';
 
 const CANCELLED = 'CANCELLED';
 const ACTIVE_BOOKINGS = { status: { not: CANCELLED } } as const;
-
-const PASSWORD_RE =
-  /^(?=.*[a-zа-яё])(?=.*[A-ZА-ЯЁ])(?=.*\d)(?=.*[^A-Za-zА-Яа-яЁё0-9\s]).{8,}$/;
 
 class RegisterDto {
   @IsEmail({}, { message: 'Укажите корректный email' }) email: string;
   @IsString()
   @MinLength(8, { message: 'Пароль не короче 8 символов' })
-  @Matches(PASSWORD_RE, {
-    message:
-      'Пароль: 8+ символов, заглавная и строчная буквы, цифра и специальный символ',
-  })
+  @Matches(PASSWORD_RE, { message: PASSWORD_RULE })
   password: string;
   @IsString() @IsNotEmpty({ message: 'Укажите ФИО' }) name: string;
   @IsString() @IsNotEmpty({ message: 'Укажите телефон' }) phone: string;

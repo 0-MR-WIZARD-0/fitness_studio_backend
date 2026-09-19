@@ -11,7 +11,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { AuthenticatedGuard } from '../auth/guards';
+import {
+  AuthenticatedGuard,
+  TrainerAllowed,
+  currentAdmin,
+} from '../auth/guards';
 import {
   UserGuard,
   currentUserId,
@@ -30,6 +34,7 @@ import {
 } from './dto';
 import { IdPipe } from '../common/id.pipe';
 
+@TrainerAllowed()
 @Controller('booking')
 export class BookingController {
   constructor(private readonly booking: BookingService) {}
@@ -68,14 +73,14 @@ export class BookingController {
 
   @UseGuards(AuthenticatedGuard)
   @Post('slots')
-  createSlot(@Body() dto: CreateSlotDto) {
-    return this.booking.createSlot(dto);
+  createSlot(@Body() dto: CreateSlotDto, @Req() req: Request) {
+    return this.booking.createSlot(dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
   @Post('slots/weekdays')
-  createWeekdays(@Body() dto: CreateWeekdaySlotsDto) {
-    return this.booking.createWeekdaySlots(dto);
+  createWeekdays(@Body() dto: CreateWeekdaySlotsDto, @Req() req: Request) {
+    return this.booking.createWeekdaySlots(dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
@@ -83,9 +88,9 @@ export class BookingController {
   updateSlot(
     @Param('id', IdPipe) id: number,
     @Body() dto: UpdateSlotDto,
-    @Req() req: { user?: { username?: string } },
+    @Req() req: Request,
   ) {
-    return this.booking.updateSlot(id, dto, req.user?.username);
+    return this.booking.updateSlot(id, dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
@@ -93,9 +98,9 @@ export class BookingController {
   removeSlot(
     @Param('id', IdPipe) id: number,
     @Body() dto: RemoveSlotDto,
-    @Req() req: { user?: { username?: string } },
+    @Req() req: Request,
   ) {
-    return this.booking.removeSlot(id, dto, req.user?.username);
+    return this.booking.removeSlot(id, dto ?? {}, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
@@ -103,8 +108,9 @@ export class BookingController {
   moveClientBooking(
     @Param('id', IdPipe) id: number,
     @Body() dto: MoveClientBookingDto,
+    @Req() req: Request,
   ) {
-    return this.booking.moveClientBooking(id, dto.slotId);
+    return this.booking.moveClientBooking(id, dto.slotId, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Post,
   Req,
   UploadedFile,
@@ -16,7 +17,11 @@ import { extname, join, normalize } from 'path';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
 import { IsString } from 'class-validator';
-import { AuthenticatedGuard } from '../auth/guards';
+import {
+  AuthenticatedGuard,
+  TrainerAllowed,
+  currentAdmin,
+} from '../auth/guards';
 import { RateLimit } from '../common/rate-limit.guard';
 
 const UPLOAD_ROOT = './uploads';
@@ -43,7 +48,9 @@ class DeleteDto {
 
 function folderFor(req: Request): string {
   const isAdmin = req.isAuthenticated?.() ?? false;
-  return isAdmin ? safeFolder(req.query.folder as string | undefined) : 'reviews';
+  return isAdmin
+    ? safeFolder(req.query.folder as string | undefined)
+    : 'reviews';
 }
 
 @Controller('uploads')
@@ -86,9 +93,12 @@ export class UploadsController {
   }
 
   @UseGuards(AuthenticatedGuard)
+  @TrainerAllowed()
   @Delete()
-  remove(@Body() dto: DeleteDto): { ok: true } {
+  remove(@Body() dto: DeleteDto, @Req() req: Request): { ok: true } {
     const rel = dto.url.replace(/^\/uploads\//, '');
+    if (currentAdmin(req).role !== 'OWNER' && !rel.startsWith('trainers/'))
+      throw new ForbiddenException('Удалять можно только своё фото');
     const target = normalize(join(UPLOAD_ROOT, rel));
     if (!target.startsWith(normalize(UPLOAD_ROOT))) {
       throw new BadRequestException('Недопустимый путь');

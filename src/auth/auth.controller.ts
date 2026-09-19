@@ -7,7 +7,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { AuthenticatedGuard, LocalAuthGuard } from './guards';
+import { AuthenticatedGuard, LocalAuthGuard, TrainerAllowed } from './guards';
 import { RateLimit } from '../common/rate-limit.guard';
 import { SessionAdmin } from './auth.service';
 
@@ -23,6 +23,7 @@ export class AuthController {
   }
 
   @UseGuards(AuthenticatedGuard)
+  @TrainerAllowed()
   @Get('me')
   me(@Req() req: Request): { user: SessionAdmin } {
     return { user: req.user as SessionAdmin };

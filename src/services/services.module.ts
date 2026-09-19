@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -25,7 +24,13 @@ import {
   Min,
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthenticatedGuard } from '../auth/guards';
+import {
+  AuthenticatedGuard,
+  TrainerAllowed,
+  assertOwnItem,
+  currentAdmin,
+} from '../auth/guards';
+import type { SessionAdmin } from '../auth/auth.service';
 import {
   AccountModule,
   UserGuard,
@@ -38,11 +43,11 @@ import {
 import { IdPipe } from '../common/id.pipe';
 
 class UpsertServiceDto {
-  @IsString() @IsNotEmpty({ message: 'Укажите название услуги' })
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите название услуги' })
   title: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsInt() @Min(0) price?: number;
-  @IsOptional() @IsInt() @Min(0) durationMin?: number | null;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -64,7 +69,7 @@ export class ServicesService {
       title: dto.title.trim(),
       description: dto.description ?? '',
       price: dto.price ?? 0,
-      durationMin: dto.durationMin ? dto.durationMin : null,
+      durationMin: null,
       order: dto.order ?? 0,
       isActive: dto.isActive ?? true,
     };
@@ -83,17 +88,19 @@ export class ServicesService {
     });
   }
 
-  create(dto: UpsertServiceDto) {
-    return this.prisma.service.create({ data: this.data(dto) });
+  create(dto: UpsertServiceDto, admin: SessionAdmin) {
+    return this.prisma.service.create({
+      data: { ...this.data(dto), createdById: admin.id },
+    });
   }
 
-  async update(id: number, dto: UpsertServiceDto) {
-    await this.ensure(id);
+  async update(id: number, dto: UpsertServiceDto, admin: SessionAdmin) {
+    assertOwnItem(admin, await this.ensure(id), 'услуги');
     return this.prisma.service.update({ where: { id }, data: this.data(dto) });
   }
 
-  async remove(id: number) {
-    await this.ensure(id);
+  async remove(id: number, admin: SessionAdmin) {
+    assertOwnItem(admin, await this.ensure(id), 'услуги');
     await this.prisma.service.delete({ where: { id } });
     return { ok: true };
   }
@@ -108,10 +115,6 @@ export class ServicesService {
     });
     if (!service || !service.isActive)
       throw new NotFoundException('Услуга не найдена');
-    if (service.durationMin)
-      throw new BadRequestException(
-        'Для этой услуги нужно выбрать время в расписании',
-      );
 
     const booking = await this.prisma.booking.create({
       data: {
@@ -145,6 +148,7 @@ export class ServicesService {
   }
 }
 
+@TrainerAllowed()
 @Controller('services')
 class ServicesController {
   constructor(private readonly services: ServicesService) {}
@@ -168,20 +172,24 @@ class ServicesController {
 
   @UseGuards(AuthenticatedGuard)
   @Post()
-  create(@Body() dto: UpsertServiceDto) {
-    return this.services.create(dto);
+  create(@Body() dto: UpsertServiceDto, @Req() req: Request) {
+    return this.services.create(dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
   @Put(':id')
-  update(@Param('id', IdPipe) id: number, @Body() dto: UpsertServiceDto) {
-    return this.services.update(id, dto);
+  update(
+    @Param('id', IdPipe) id: number,
+    @Body() dto: UpsertServiceDto,
+    @Req() req: Request,
+  ) {
+    return this.services.update(id, dto, currentAdmin(req));
   }
 
   @UseGuards(AuthenticatedGuard)
   @Delete(':id')
-  remove(@Param('id', IdPipe) id: number) {
-    return this.services.remove(id);
+  remove(@Param('id', IdPipe) id: number, @Req() req: Request) {
+    return this.services.remove(id, currentAdmin(req));
   }
 }
 

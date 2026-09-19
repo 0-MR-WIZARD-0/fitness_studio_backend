@@ -9,13 +9,23 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   const username = process.env.ADMIN_USERNAME ?? 'admin';
   const password = process.env.ADMIN_PASSWORD ?? 'admin123';
-  const passwordHash = await bcrypt.hash(password, 10);
 
-  await prisma.admin.upsert({
-    where: { username },
-    update: { passwordHash },
-    create: { username, passwordHash },
-  });
+  const owner = await prisma.admin.findFirst({ where: { role: 'OWNER' } });
+  if (!owner) {
+    await prisma.admin.create({
+      data: {
+        username,
+        passwordHash: await bcrypt.hash(password, 10),
+        role: 'OWNER',
+      },
+    });
+  } else if (process.env.ADMIN_RESET === '1') {
+    await prisma.admin.update({
+      where: { id: owner.id },
+      data: { username, passwordHash: await bcrypt.hash(password, 10) },
+    });
+    console.log('Логин и пароль главного админа сброшены из окружения');
+  }
 
   await prisma.siteSettings.upsert({
     where: { id: 1 },
@@ -23,7 +33,9 @@ async function main() {
     create: { id: 1 },
   });
 
-  console.log(`Админ "${username}" готов`);
+  console.log(
+    owner ? 'Главный админ уже есть' : `Главный админ "${username}" создан`,
+  );
 }
 
 main()

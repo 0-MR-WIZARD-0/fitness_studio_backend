@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -32,11 +33,13 @@ class UpsertHallDto {
   @IsOptional() @IsInt() @Min(0) price4?: number;
   @IsOptional() @IsInt() @Min(0) price8?: number;
   @IsOptional() @IsInt() @Min(0) price12?: number;
-  @IsOptional() @IsBoolean() isMain?: boolean;
+  @IsOptional() @IsBoolean() autoSchedule?: boolean;
   @IsOptional() @IsString() bookingUrl?: string;
-  @IsOptional() @Matches(/^\d{1,2}:\d{2}$/, { message: 'Время в формате ЧЧ:ММ' })
+  @IsOptional()
+  @Matches(/^\d{1,2}:\d{2}$/, { message: 'Время в формате ЧЧ:ММ' })
   dayStart?: string;
-  @IsOptional() @Matches(/^\d{1,2}:\d{2}$/, { message: 'Время в формате ЧЧ:ММ' })
+  @IsOptional()
+  @Matches(/^\d{1,2}:\d{2}$/, { message: 'Время в формате ЧЧ:ММ' })
   dayEnd?: string;
   @IsOptional() @IsInt() @Min(0) bufferMin?: number;
   @IsOptional() @IsInt() order?: number;
@@ -50,7 +53,8 @@ export class HallsService {
     private readonly rent: RentService,
   ) {}
 
-  private data(dto: UpsertHallDto, isMain: boolean) {
+  private data(dto: UpsertHallDto) {
+    const autoSchedule = dto.autoSchedule ?? false;
     return {
       title: dto.title.trim(),
       description: dto.description ?? '',
@@ -58,21 +62,14 @@ export class HallsService {
       price4: dto.price4 ?? 0,
       price8: dto.price8 ?? 0,
       price12: dto.price12 ?? 0,
-      isMain,
-      bookingUrl: dto.bookingUrl?.trim() ?? '',
+      autoSchedule,
+      bookingUrl: autoSchedule ? '' : (dto.bookingUrl?.trim() ?? ''),
       dayStart: dto.dayStart ?? '09:00',
       dayEnd: dto.dayEnd ?? '17:30',
       bufferMin: dto.bufferMin ?? 30,
       order: dto.order ?? 0,
       isActive: dto.isActive ?? true,
     };
-  }
-
-  private async clearMain(exceptId?: number) {
-    await this.prisma.hall.updateMany({
-      where: { isMain: true, ...(exceptId ? { id: { not: exceptId } } : {}) },
-      data: { isMain: false },
-    });
   }
 
   listPublic() {
@@ -89,24 +86,20 @@ export class HallsService {
   }
 
   async create(dto: UpsertHallDto) {
-    const total = await this.prisma.hall.count();
-    const isMain = dto.isMain ?? total === 0;
-    if (isMain) await this.clearMain();
-    const hall = await this.prisma.hall.create({ data: this.data(dto, isMain) });
-    if (isMain) await this.rent.syncRange();
+    const hall = await this.prisma.hall.create({ data: this.data(dto) });
+    if (hall.autoSchedule) await this.rent.syncRange();
     return hall;
   }
 
   async update(id: number, dto: UpsertHallDto) {
     const before = await this.ensure(id);
-    const isMain = dto.isMain ?? before.isMain;
-    if (isMain) await this.clearMain(id);
     const hall = await this.prisma.hall.update({
       where: { id },
-      data: this.data(dto, isMain),
+      data: this.data(dto),
     });
     const affectsSlots =
-      isMain !== before.isMain ||
+      hall.autoSchedule !== before.autoSchedule ||
+      hall.isActive !== before.isActive ||
       hall.priceSingle !== before.priceSingle ||
       hall.dayStart !== before.dayStart ||
       hall.dayEnd !== before.dayEnd ||
@@ -117,18 +110,15 @@ export class HallsService {
 
   async remove(id: number) {
     const before = await this.ensure(id);
+    const lessons = await this.prisma.slot.count({
+      where: { hallId: id, startsAt: { gte: new Date() } },
+    });
+    if (lessons)
+      throw new BadRequestException(
+        `В зале ${lessons} занятий в расписании — перенесите их в другой зал или удалите`,
+      );
     await this.prisma.hall.delete({ where: { id } });
-    if (before.isMain) {
-      const next = await this.prisma.hall.findFirst({
-        orderBy: [{ order: 'asc' }, { id: 'asc' }],
-      });
-      if (next)
-        await this.prisma.hall.update({
-          where: { id: next.id },
-          data: { isMain: true },
-        });
-      await this.rent.syncRange();
-    }
+    if (before.autoSchedule) await this.rent.syncRange();
     return { ok: true };
   }
 

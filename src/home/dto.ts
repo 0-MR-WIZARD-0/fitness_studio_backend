@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
 } from 'class-validator';
@@ -17,7 +18,7 @@ export class UpdateHeroDto {
 }
 
 export class UpsertFaqDto {
-  @IsString() question: string;
+  @IsString() @IsNotEmpty({ message: 'Заполните вопрос' }) question: string;
   @IsString() answer: string;
   @IsOptional() @IsString() imageUrl?: string | null;
   @IsOptional() @IsInt() order?: number;
@@ -26,7 +27,7 @@ export class UpsertFaqDto {
 
 export class UpsertStepDto {
   @IsOptional() @IsString() label?: string;
-  @IsString() title: string;
+  @IsString() @IsNotEmpty({ message: 'Заполните заголовок' }) title: string;
   @IsString() description: string;
   @IsOptional() @IsString() imageUrl?: string | null;
   @IsOptional() @IsInt() order?: number;
