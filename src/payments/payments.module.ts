@@ -106,9 +106,14 @@ export class PaymentsService {
       body: JSON.stringify({ ...payload, Token: this.sign(payload) }),
       signal: AbortSignal.timeout(15000),
     }).catch((e: Error) => {
-      this.log.error(`${method}: банк недоступен — ${e.message}`);
+      const cause = (e as { cause?: { code?: string; message?: string } }).cause;
+      const reason =
+        e.name === 'TimeoutError'
+          ? 'банк не ответил за 15 с'
+          : (cause?.code ?? cause?.message ?? e.message);
+      this.log.error(`${method} к ${api}: ${reason}`);
       throw new ServiceUnavailableException(
-        'Оплата временно недоступна, попробуйте позже',
+        `Оплата временно недоступна (${reason}), попробуйте позже`,
       );
     });
 
@@ -157,20 +162,7 @@ export class PaymentsService {
         redirectUrl: `/payment/mock?booking=${booking.id}`,
       };
     }
-    const { site, withReceipt } = this.config;
-    const data = await this.call('Init', {
-      Amount: booking.price * 100,
-      OrderId: String(booking.id),
-      Description: booking.title.slice(0, 250),
-      SuccessURL: `${site}/payment/success?booking=${booking.id}`,
-      FailURL: `${site}/payment/fail?booking=${booking.id}`,
-      NotificationURL: `${site}/api/payments/tinkoff/notify`,
-      DATA: {
-        ...(booking.email ? { Email: booking.email } : {}),
-        ...(booking.phone ? { Phone: booking.phone } : {}),
-      },
-      ...(withReceipt ? { Receipt: this.receipt(booking) } : {}),
-    });
+    const data = await this.init(booking, alsoBookings);
 
     await this.prisma.booking.updateMany({
       where: { id: { in: [booking.id, ...alsoBookings] } },
@@ -181,6 +173,31 @@ export class PaymentsService {
       },
     });
     return { status: 'tinkoff', redirectUrl: data.PaymentURL ?? null };
+  }
+
+  private async init(booking: PayableBooking, alsoBookings: number[]) {
+    const { site, withReceipt } = this.config;
+    try {
+      return await this.call('Init', {
+        Amount: booking.price * 100,
+        OrderId: String(booking.id),
+        Description: booking.title.slice(0, 250),
+        SuccessURL: `${site}/payment/success?booking=${booking.id}`,
+        FailURL: `${site}/payment/fail?booking=${booking.id}`,
+        NotificationURL: `${site}/api/payments/tinkoff/notify`,
+        DATA: {
+          ...(booking.email ? { Email: booking.email } : {}),
+          ...(booking.phone ? { Phone: booking.phone } : {}),
+        },
+        ...(withReceipt ? { Receipt: this.receipt(booking) } : {}),
+      });
+    } catch (e) {
+      await this.prisma.booking.deleteMany({
+        where: { id: { in: [booking.id, ...alsoBookings] } },
+      });
+      this.log.warn(`Заявка ${booking.id} снята: платёж не создан`);
+      throw e;
+    }
   }
 
   async refund(bookingId: number) {
