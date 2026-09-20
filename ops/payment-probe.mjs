@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 
 const api = (
-  process.env.TINKOFF_API ?? 'https://securepay.tinkoff.ru/v2'
+  process.env.TINKOFF_API ?? 'https://securepay.tbank.ru/v2'
 ).replace(/\/+$/, '');
 const terminalKey = process.env.TINKOFF_TERMINAL_KEY ?? '';
 const password = process.env.TINKOFF_PASSWORD ?? '';

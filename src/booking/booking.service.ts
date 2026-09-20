@@ -30,6 +30,14 @@ import {
 } from './dto';
 
 const MS_DAY = 86400000;
+
+type BookingTarget = { slotId: number } | { announcementId: number };
+type Client = {
+  id: number | null;
+  name: string;
+  phone: string;
+  email: string | null;
+};
 const ACTIVE_BOOKINGS = { status: { not: 'CANCELLED' as const } };
 
 @Injectable()
@@ -58,34 +66,63 @@ export class BookingService {
     return { id: null as number | null, name, phone, email: null };
   }
 
-  private async ensureNotBooked(
-    tx: Prisma.TransactionClient,
-    where: { slotId: number } | { announcementId: number },
-    client: {
-      id: number | null;
+  private samePerson(
+    client: Client,
+    row: {
+      userId: number | null;
       name: string;
       phone: string;
       email: string | null;
     },
+  ) {
+    const text = (value?: string | null) =>
+      (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const digits = (value?: string | null) =>
+      (value ?? '').replace(/\D/g, '').slice(-10);
+    return (
+      (client.id !== null && row.userId === client.id) ||
+      (!!digits(client.phone) && digits(row.phone) === digits(client.phone)) ||
+      (!!text(client.email) && text(row.email) === text(client.email)) ||
+      (!!text(client.name) && text(row.name) === text(client.name))
+    );
+  }
+
+  private async ensureNotBooked(
+    tx: Prisma.TransactionClient,
+    where: BookingTarget,
+    client: Client,
     what: string,
   ) {
     const existing = await tx.booking.findMany({
       where: { ...where, ...ACTIVE_BOOKINGS },
       select: { userId: true, name: true, phone: true, email: true },
     });
-    const text = (value?: string | null) =>
-      (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-    const digits = (value?: string | null) =>
-      (value ?? '').replace(/\D/g, '').slice(-10);
+    if (existing.some((b) => this.samePerson(client, b)))
+      throw new ConflictException(`Вы уже записаны на ${what}`);
+  }
 
-    const mine = existing.some(
-      (b) =>
-        (client.id !== null && b.userId === client.id) ||
-        (!!digits(client.phone) && digits(b.phone) === digits(client.phone)) ||
-        (!!text(client.email) && text(b.email) === text(client.email)) ||
-        (!!text(client.name) && text(b.name) === text(client.name)),
-    );
-    if (mine) throw new ConflictException(`Вы уже записаны на ${what}`);
+  private async resumeUnpaid(where: BookingTarget, client: Client) {
+    const waiting = await this.prisma.booking.findMany({
+      where: { ...where, ...ACTIVE_BOOKINGS, price: { gt: 0 } },
+      select: {
+        id: true,
+        status: true,
+        price: true,
+        paymentId: true,
+        userId: true,
+        name: true,
+        phone: true,
+        email: true,
+      },
+    });
+    for (const row of waiting) {
+      if (row.status !== 'PENDING' || !row.paymentId) continue;
+      if (!this.samePerson(client, row)) continue;
+      const resumed = await this.payments.resume(row.id);
+      if (resumed.state === 'pending' && resumed.url)
+        return { bookingId: row.id, url: resumed.url, price: row.price };
+    }
+    return null;
   }
 
   async availableSlots(formatId?: number) {
@@ -330,6 +367,11 @@ export class BookingService {
         'Промокод работает в личном кабинете — войдите',
       );
     const { single } = await this.prices();
+    const waiting = this.known(user, dto);
+    if (waiting) {
+      const hit = await this.resumeUnpaid({ slotId: dto.slotId }, waiting);
+      if (hit) return this.resumedPayment(hit);
+    }
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
       : null;
@@ -405,6 +447,17 @@ export class BookingService {
     const user = await this.client(userId);
     await this.documents.ensureAccepted(dto.documentIds);
     const ids = [...new Set(dto.slotIds)];
+    for (const slotId of ids) {
+      const hit = await this.resumeUnpaid({ slotId }, user);
+      if (hit)
+        return {
+          isCourse: false,
+          courses: 0,
+          total: hit.price,
+          giftCodes: [],
+          payment: { status: 'tinkoff', redirectUrl: hit.url },
+        };
+    }
     const { single, threshold } = await this.prices();
 
     const outcome = await this.prisma.$transaction(async (tx) => {
@@ -513,6 +566,14 @@ export class BookingService {
       throw new UnauthorizedException(
         'Промокод работает в личном кабинете — войдите',
       );
+    const waiting = this.known(user, dto);
+    if (waiting) {
+      const hit = await this.resumeUnpaid(
+        { announcementId: dto.announcementId },
+        waiting,
+      );
+      if (hit) return this.resumedPayment(hit);
+    }
     const promo = dto.promoCode
       ? await this.promo.validate(dto.promoCode)
       : null;
@@ -630,6 +691,25 @@ export class BookingService {
         user: { select: { id: true, email: true } },
       },
     });
+  }
+
+  // кто записывается: вошедший клиент или гость, если он назвался
+  private known(user: Client | null, dto: { name?: string; phone?: string }) {
+    if (user) return user;
+    return dto.name?.trim() && dto.phone?.trim() ? this.guest(dto) : null;
+  }
+
+  private resumedPayment(hit: {
+    bookingId: number;
+    url: string;
+    price: number;
+  }) {
+    return {
+      bookingId: hit.bookingId,
+      free: false,
+      total: hit.price,
+      payment: { status: 'tinkoff', redirectUrl: hit.url },
+    };
   }
 
   private async payment(

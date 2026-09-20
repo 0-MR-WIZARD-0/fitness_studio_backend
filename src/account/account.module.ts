@@ -288,6 +288,9 @@ export class AccountService {
           isFree: b.isFree,
           isCourse: b.isCourse,
           status: b.status,
+          awaitingPayment:
+            b.status === 'PENDING' && b.price > 0 && !!b.paymentId,
+          paymentUrl: b.status === 'PENDING' ? b.paymentUrl : null,
           promoCode: b.promoCode?.code ?? null,
           canMove: editable && kind === 'LESSON',
           canCancel: editable,

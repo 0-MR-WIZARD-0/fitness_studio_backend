@@ -63,7 +63,7 @@ export class PaymentsService {
     return {
       terminalKey: process.env.TINKOFF_TERMINAL_KEY ?? '',
       password: process.env.TINKOFF_PASSWORD ?? '',
-      api: trim(process.env.TINKOFF_API) || 'https://securepay.tinkoff.ru/v2',
+      api: trim(process.env.TINKOFF_API) || 'https://securepay.tbank.ru/v2',
       site:
         trim(process.env.PUBLIC_URL) ||
         trim(process.env.FRONTEND_URL) ||
@@ -106,7 +106,8 @@ export class PaymentsService {
       body: JSON.stringify({ ...payload, Token: this.sign(payload) }),
       signal: AbortSignal.timeout(15000),
     }).catch((e: Error) => {
-      const cause = (e as { cause?: { code?: string; message?: string } }).cause;
+      const cause = (e as { cause?: { code?: string; message?: string } })
+        .cause;
       const reason =
         e.name === 'TimeoutError'
           ? 'банк не ответил за 15 с'
@@ -198,6 +199,21 @@ export class PaymentsService {
       this.log.warn(`Заявка ${booking.id} снята: платёж не создан`);
       throw e;
     }
+  }
+
+  async resume(bookingId: number) {
+    const state = await this.status(bookingId);
+    if (state.paid) return { state: 'paid' as const, url: null };
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
+    if (!booking || booking.status === 'CANCELLED') {
+      if (booking)
+        await this.prisma.booking.delete({ where: { id: bookingId } });
+      return { state: 'failed' as const, url: null };
+    }
+    return { state: 'pending' as const, url: booking.paymentUrl };
   }
 
   async refund(bookingId: number) {
