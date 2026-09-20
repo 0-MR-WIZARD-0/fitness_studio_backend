@@ -32,6 +32,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RateLimit } from '../common/rate-limit.guard';
 import { IdPipe } from '../common/id.pipe';
 import { PASSWORD_RE, PASSWORD_RULE } from '../common/password';
+import { PaymentsModule, PaymentsService } from '../payments/payments.module';
 
 const CANCELLED = 'CANCELLED';
 const ACTIVE_BOOKINGS = { status: { not: CANCELLED } } as const;
@@ -86,7 +87,10 @@ export function currentUserId(req: Request): number {
 
 @Injectable()
 export class AccountService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly payments: PaymentsService,
+  ) {}
 
   private publicUser(user: {
     id: number;
@@ -389,6 +393,7 @@ export class AccountService {
       where: { id: bookingId },
       data: { status: CANCELLED },
     });
+    await this.payments.refund(bookingId);
 
     let gift: string | null = null;
     if (booking.courseGroupId) {
@@ -438,6 +443,7 @@ export class AccountService {
       });
     if (promo) await this.prisma.promoCode.delete({ where: { id: promo.id } });
 
+    for (const b of bookings) await this.payments.refund(b.id);
     await this.prisma.booking.updateMany({
       where: { id: { in: bookings.map((b) => b.id) } },
       data: { status: CANCELLED },
@@ -637,6 +643,7 @@ class AccountController {
 }
 
 @Module({
+  imports: [PaymentsModule],
   providers: [AccountService, UserGuard],
   controllers: [AccountController],
   exports: [AccountService, UserGuard],

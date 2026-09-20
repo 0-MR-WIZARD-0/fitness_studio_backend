@@ -39,6 +39,7 @@ import {
   DocumentsService,
 } from '../documents/documents.module';
 import { IdPipe } from '../common/id.pipe';
+import { PaymentsModule, PaymentsService } from '../payments/payments.module';
 
 class UpsertRentalSlotDto {
   @IsDateString() startsAt: string;
@@ -94,6 +95,7 @@ export class RentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly documents: DocumentsService,
+    private readonly payments: PaymentsService,
   ) {}
 
   private map(slot: {
@@ -568,7 +570,7 @@ export class RentService {
     if (!user) throw new UnauthorizedException('Войдите в личный кабинет');
     await this.documents.ensureAccepted(dto.documentIds);
 
-    return this.prisma.$transaction(async (tx) => {
+    const booked = await this.prisma.$transaction(async (tx) => {
       const slot = await tx.rentalSlot.findUnique({
         where: { id: dto.rentalSlotId },
         include: { bookings: { where: ACTIVE_BOOKINGS, select: { id: true } } },
@@ -593,18 +595,22 @@ export class RentService {
         },
       });
 
-      return {
-        bookingId: booking.id,
-        total: slot.price,
-        payment:
-          slot.price > 0
-            ? {
-                status: 'mock',
-                redirectUrl: `/payment/mock?total=${slot.price}`,
-              }
-            : { status: 'free', redirectUrl: null },
-      };
+      return { booking, total: slot.price, startsAt: slot.startsAt };
     });
+
+    const payment =
+      booked.total > 0
+        ? await this.payments.start({
+            id: booked.booking.id,
+            price: booked.total,
+            name: booked.booking.name,
+            phone: booked.booking.phone,
+            email: booked.booking.email,
+            title: `Аренда зала ${this.when(booked.startsAt)}`,
+          })
+        : { status: 'free', redirectUrl: null };
+
+    return { bookingId: booked.booking.id, total: booked.total, payment };
   }
 
   photos() {
@@ -731,7 +737,7 @@ class RentController {
 }
 
 @Module({
-  imports: [AccountModule, DocumentsModule],
+  imports: [AccountModule, DocumentsModule, PaymentsModule],
   providers: [RentService],
   controllers: [RentController],
   exports: [RentService],

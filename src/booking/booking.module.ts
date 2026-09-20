@@ -6,9 +6,17 @@ import { AuthModule } from '../auth/auth.module';
 import { RentModule } from '../rent/rent.module';
 import { AccountModule } from '../account/account.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
-  imports: [PromoModule, AuthModule, RentModule, AccountModule, DocumentsModule],
+  imports: [
+    PromoModule,
+    AuthModule,
+    RentModule,
+    AccountModule,
+    DocumentsModule,
+    PaymentsModule,
+  ],
   providers: [BookingService],
   controllers: [BookingController],
 })

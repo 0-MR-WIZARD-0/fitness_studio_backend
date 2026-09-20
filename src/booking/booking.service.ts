@@ -16,6 +16,7 @@ import { MailService } from '../mail/mail.service';
 import { AuthService } from '../auth/auth.service';
 import { RentService } from '../rent/rent.module';
 import { DocumentsService } from '../documents/documents.module';
+import { PaymentsService } from '../payments/payments.module';
 import type { SessionAdmin } from '../auth/auth.service';
 import { assertOwnItem } from '../auth/guards';
 import {
@@ -40,6 +41,7 @@ export class BookingService {
     private readonly auth: AuthService,
     private readonly rent: RentService,
     private readonly documents: DocumentsService,
+    private readonly payments: PaymentsService,
   ) {}
 
   private async client(userId: number) {
@@ -304,10 +306,15 @@ export class BookingService {
       if (!(await this.auth.checkPassword(admin.id, dto.password ?? '')))
         throw new UnauthorizedException('Неверный пароль');
 
+      const paid = await this.prisma.booking.findMany({
+        where: { slotId: id, ...ACTIVE_BOOKINGS },
+        select: { id: true },
+      });
       await this.prisma.booking.updateMany({
         where: { slotId: id },
         data: { status: 'CANCELLED' },
       });
+      for (const b of paid) await this.payments.refund(b.id);
     }
 
     await this.prisma.slot.delete({ where: { id } });
@@ -380,12 +387,18 @@ export class BookingService {
           isFree: free,
           promoCodeId: promo?.id,
         },
-        include: { slot: true },
+        include: { slot: { include: { format: true } } },
       });
       return { booking, free, price };
     });
 
-    return this.payment(result.booking.id, result.free, result.price);
+    const slot = result.booking.slot;
+    return this.payment(
+      result.booking,
+      result.free,
+      result.price,
+      slot?.isDiagnostic ? 'Диагностика' : (slot?.format?.name ?? 'Занятие'),
+    );
   }
 
   async bookCart(dto: CartBookingDto, userId: number) {
@@ -428,10 +441,11 @@ export class BookingService {
       }
 
       let total = 0;
+      const bookingIds: number[] = [];
       for (const s of slots) {
         const price = single;
         total += price;
-        await tx.booking.create({
+        const created = await tx.booking.create({
           data: {
             userId: user.id,
             slotId: s.id,
@@ -444,11 +458,13 @@ export class BookingService {
             price,
           },
         });
+        bookingIds.push(created.id);
       }
       return {
         courses: groups.length,
         groupIds: [...new Set(groupIdBySlot.values())],
         total,
+        bookingIds,
       };
     });
 
@@ -472,15 +488,21 @@ export class BookingService {
       });
     }
 
+    const [first, ...rest] = outcome.bookingIds;
+    const paid = await this.payment(
+      { id: first, name: user.name, phone: user.phone, email: user.email },
+      outcome.total <= 0,
+      outcome.total,
+      `Занятия в студии, ${outcome.bookingIds.length} шт.`,
+      rest,
+    );
+
     return {
       isCourse: outcome.courses > 0,
       courses: outcome.courses,
       total: outcome.total,
       giftCodes,
-      payment: {
-        status: 'mock',
-        redirectUrl: `/payment/mock?total=${outcome.total}`,
-      },
+      payment: paid.payment,
     };
   }
 
@@ -541,10 +563,15 @@ export class BookingService {
           promoCodeId: promo?.id,
         },
       });
-      return { booking, free, price };
+      return { booking, free, price, title: a.title };
     });
 
-    return this.payment(result.booking.id, result.free, result.price);
+    return this.payment(
+      result.booking,
+      result.free,
+      result.price,
+      result.title,
+    );
   }
 
   async moveClientBooking(
@@ -605,18 +632,30 @@ export class BookingService {
     });
   }
 
-  private payment(bookingId: number, free: boolean, total: number) {
-    return {
-      bookingId,
-      free,
-      total,
-      payment: free
-        ? { status: 'free', redirectUrl: null }
-        : {
-            status: 'mock',
-            redirectUrl: `/payment/mock?bookingId=${bookingId}`,
-          },
-    };
+  private async payment(
+    booking: {
+      id: number;
+      name: string;
+      phone: string;
+      email: string | null;
+    },
+    free: boolean,
+    total: number,
+    title: string,
+    alsoBookings: number[] = [],
+  ) {
+    if (free || total <= 0)
+      return {
+        bookingId: booking.id,
+        free: true,
+        total: 0,
+        payment: { status: 'free', redirectUrl: null },
+      };
+    const payment = await this.payments.start(
+      { ...booking, price: total, title },
+      alsoBookings,
+    );
+    return { bookingId: booking.id, free: false, total, payment };
   }
 
   private async ensureFormat(id: number) {

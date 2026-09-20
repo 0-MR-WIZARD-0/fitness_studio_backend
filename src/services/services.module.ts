@@ -41,6 +41,7 @@ import {
   DocumentsService,
 } from '../documents/documents.module';
 import { IdPipe } from '../common/id.pipe';
+import { PaymentsModule, PaymentsService } from '../payments/payments.module';
 
 class UpsertServiceDto {
   @IsString()
@@ -62,6 +63,7 @@ export class ServicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly documents: DocumentsService,
+    private readonly payments: PaymentsService,
   ) {}
 
   private data(dto: UpsertServiceDto) {
@@ -128,17 +130,19 @@ export class ServicesService {
       },
     });
 
-    return {
-      bookingId: booking.id,
-      total: service.price,
-      payment:
-        service.price > 0
-          ? {
-              status: 'mock',
-              redirectUrl: `/payment/mock?total=${service.price}`,
-            }
-          : { status: 'free', redirectUrl: null },
-    };
+    const payment =
+      service.price > 0
+        ? await this.payments.start({
+            id: booking.id,
+            price: service.price,
+            name: booking.name,
+            phone: booking.phone,
+            email: booking.email,
+            title: service.title,
+          })
+        : { status: 'free', redirectUrl: null };
+
+    return { bookingId: booking.id, total: service.price, payment };
   }
 
   private async ensure(id: number) {
@@ -194,7 +198,7 @@ class ServicesController {
 }
 
 @Module({
-  imports: [AccountModule, DocumentsModule],
+  imports: [AccountModule, DocumentsModule, PaymentsModule],
   providers: [ServicesService],
   controllers: [ServicesController],
   exports: [ServicesService],

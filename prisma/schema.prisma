@@ -340,6 +340,11 @@ model Booking {
   isFree         Boolean       @default(false)
   status         BookingStatus @default(PENDING)
   createdAt      DateTime      @default(now())
+
+  paymentId     String?
+  paymentStatus String?
+  paymentUrl    String?
+  paidAt        DateTime?
 }
 
 enum PromoKind {
