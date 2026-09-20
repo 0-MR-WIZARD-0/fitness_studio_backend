@@ -26,7 +26,7 @@ export class ReviewsController {
     return this.reviews.listApproved();
   }
 
-  @UseGuards(RateLimit(5, 60 * 60_000, 'Слишком много отзывов'))
+  @UseGuards(RateLimit(1, 24 * 60 * 60_000, 'Отзыв можно оставить раз в сутки'))
   @Post()
   submit(@Body() dto: CreateReviewDto) {
     return this.reviews.submit(dto);

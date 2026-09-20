@@ -55,7 +55,7 @@ function folderFor(req: Request): string {
 
 @Controller('uploads')
 export class UploadsController {
-  @UseGuards(RateLimit(10, 10 * 60_000, 'Слишком много загрузок'))
+  @UseGuards(RateLimit(40, 10 * 60_000, 'Слишком много загрузок'))
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {

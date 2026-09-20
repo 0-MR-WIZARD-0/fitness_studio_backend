@@ -523,7 +523,12 @@ export class BookingService {
         });
 
       const client = user ?? this.guest(dto);
-      await this.ensureNotBooked(tx, { announcementId: a.id }, client, 'анонс');
+      await this.ensureNotBooked(
+        tx,
+        { announcementId: a.id },
+        client,
+        'данное занятие',
+      );
       const booking = await tx.booking.create({
         data: {
           userId: client.id,

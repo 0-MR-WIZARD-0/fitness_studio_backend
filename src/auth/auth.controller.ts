@@ -14,7 +14,7 @@ import { SessionAdmin } from './auth.service';
 @Controller('auth')
 export class AuthController {
   @UseGuards(
-    RateLimit(10, 5 * 60_000, 'Слишком много попыток входа'),
+    RateLimit(3, 10 * 60_000, 'Слишком много попыток входа'),
     LocalAuthGuard,
   )
   @Post('login')

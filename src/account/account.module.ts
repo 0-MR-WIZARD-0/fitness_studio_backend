@@ -540,7 +540,7 @@ export class AccountService {
 class AccountController {
   constructor(private readonly account: AccountService) {}
 
-  @UseGuards(RateLimit(5, 60 * 60_000, 'Слишком много регистраций'))
+  @UseGuards(RateLimit(3, 10 * 60_000, 'Слишком много регистраций'))
   @Post('register')
   async register(@Body() dto: RegisterDto, @Req() req: Request) {
     const user = await this.account.register(dto);
@@ -548,7 +548,7 @@ class AccountController {
     return { user };
   }
 
-  @UseGuards(RateLimit(10, 5 * 60_000, 'Слишком много попыток входа'))
+  @UseGuards(RateLimit(3, 10 * 60_000, 'Слишком много попыток входа'))
   @Post('login')
   async login(@Body() dto: LoginDto, @Req() req: Request) {
     const user = await this.account.login(dto);
@@ -566,6 +566,13 @@ class AccountController {
   @Get('me')
   me(@Req() req: Request) {
     return this.account.me(currentUserId(req)).then((user) => ({ user }));
+  }
+
+  @Get('session')
+  async session(@Req() req: Request) {
+    const id = optionalUserId(req);
+    if (!id) return { user: null };
+    return { user: await this.account.me(id).catch(() => null) };
   }
 
   @UseGuards(UserGuard)
