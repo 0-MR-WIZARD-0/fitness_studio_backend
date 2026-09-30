@@ -113,6 +113,10 @@ export class PaymentsService {
           ? 'банк не ответил за 15 с'
           : (cause?.code ?? cause?.message ?? e.message);
       this.log.error(`${method} к ${api}: ${reason}`);
+      if (String(reason).includes('SELF_SIGNED'))
+        this.log.error(
+          'банк отдаёт сертификат Минцифры: он должен быть подключён через NODE_EXTRA_CA_CERTS',
+        );
       throw new ServiceUnavailableException(
         `Оплата временно недоступна (${reason}), попробуйте позже`,
       );
