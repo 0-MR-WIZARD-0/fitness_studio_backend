@@ -12,6 +12,17 @@ enum AdminRole {
   TRAINER
 }
 
+enum Sex {
+  FEMALE
+  MALE
+}
+
+enum BodyType {
+  ASTHENIC
+  NORMOSTHENIC
+  HYPERSTHENIC
+}
+
 model Admin {
   id           Int       @id @default(autoincrement())
   username     String    @unique
@@ -26,6 +37,9 @@ model Admin {
   announcements Announcement[]
   services      Service[]
   promoCodes    PromoCode[]
+  cardsEdited      ClientCard[]  @relation("CardEditor")
+  measurements     Measurement[] @relation("MeasurementAuthor")
+  measurementEdits Measurement[] @relation("MeasurementEditor")
 }
 
 model User {
@@ -40,6 +54,93 @@ model User {
   bookings   Booking[]
   promoCodes PromoCode[]
   freezes    CourseFreeze[]
+  card       ClientCard?
+}
+
+model ClientCard {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sex       Sex?
+  birthDate DateTime?
+  heightCm  Float?
+  bodyType  BodyType?
+  note      String    @default("")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  updatedById Int?
+  updatedBy   Admin? @relation("CardEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  measurements Measurement[]
+}
+
+model Measurement {
+  id      Int        @id @default(autoincrement())
+  cardId  Int
+  card    ClientCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  takenAt DateTime   @default(now())
+
+  chestCm Float?
+  waistCm Float?
+  hipsCm  Float?
+  armCm   Float?
+  thighCm Float?
+  calfCm  Float?
+
+  weightKg     Float?
+  fatPct       Float?
+  muscleKg     Float?
+  visceralFat  Float?
+  waterPct     Float?
+  boneKg       Float?
+  metabolicAge Int?
+  bmr          Int?
+
+  strengths       String    @default("")
+  risks           String    @default("")
+  trainingAdvice  String    @default("")
+  nutritionAdvice String    @default("")
+  nextCheckAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdById Int?
+  createdBy   Admin? @relation("MeasurementAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById Int?
+  updatedBy   Admin? @relation("MeasurementEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  tests MeasurementTest[]
+
+  @@index([cardId, takenAt])
+}
+
+model FunctionalTest {
+  id        Int      @id @default(autoincrement())
+  name      String
+  measures  String   @default("")
+  howTo     String   @default("")
+  norm      String   @default("")
+  unit      String   @default("")
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  results MeasurementTest[]
+}
+
+model MeasurementTest {
+  id            Int            @id @default(autoincrement())
+  measurementId Int
+  measurement   Measurement    @relation(fields: [measurementId], references: [id], onDelete: Cascade)
+  testId        Int
+  test          FunctionalTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+  value         String         @default("")
+  passed        Boolean?
+
+  @@unique([measurementId, testId])
 }
 
 model CourseFreeze {

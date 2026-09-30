@@ -693,7 +693,6 @@ export class BookingService {
     });
   }
 
-  // кто записывается: вошедший клиент или гость, если он назвался
   private known(user: Client | null, dto: { name?: string; phone?: string }) {
     if (user) return user;
     return dto.name?.trim() && dto.phone?.trim() ? this.guest(dto) : null;
