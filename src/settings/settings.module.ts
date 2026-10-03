@@ -69,6 +69,15 @@ class SettingsService {
     });
   }
 
+  private get userAgent() {
+    const site = (
+      process.env.PUBLIC_URL ||
+      process.env.FRONTEND_URL ||
+      'https://triedinstvo-studio.ru'
+    ).replace(/\/+$/, '');
+    return `triedinstvo-studio/1.0 (+${site})`;
+  }
+
   private async geocode(address: string) {
     const query = address.trim();
     if (!query) return null;
@@ -77,7 +86,7 @@ class SettingsService {
         query,
       )}`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'fitstudio.website/1.0 (studio map pin)' },
+        headers: { 'User-Agent': this.userAgent },
         signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) return null;
