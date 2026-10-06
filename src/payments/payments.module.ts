@@ -18,14 +18,23 @@ import { PrismaService } from '../prisma/prisma.service';
 import { IdPipe } from '../common/id.pipe';
 
 const PAID_STATUS = 'CONFIRMED';
+
+/** Платёж не состоялся: деньги не списаны, запись надо снять */
 const FAILED_STATUSES = [
   'REJECTED',
   'DEADLINE_EXPIRED',
   'CANCELED',
   'REVERSED',
-  'REFUNDED',
-  'PARTIAL_REFUNDED',
 ];
+
+/**
+ * Возврат мы инициируем сами и сами же проставляем статусы записей, поэтому
+ * по уведомлению о возврате трогать записи нельзя: частичный возврат одного
+ * занятия иначе снял бы весь курс, оплаченный тем же платежом.
+ */
+const REFUND_STATUSES = ['REFUNDED', 'PARTIAL_REFUNDED'];
+
+const FINAL_STATUSES = [PAID_STATUS, ...FAILED_STATUSES, ...REFUND_STATUSES];
 
 export interface PayableBooking {
   id: number;
@@ -220,23 +229,53 @@ export class PaymentsService {
     return { state: 'pending' as const, url: booking.paymentUrl };
   }
 
-  async refund(bookingId: number) {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
+  /**
+   * Возврат за указанные записи. Курс и корзина оплачиваются одним платежом,
+   * поэтому возвращаем не весь платёж, а только стоимость тех записей, которые
+   * действительно отменяют. Возвращает сумму возврата в рублях.
+   */
+  async refund(bookingIds: number | number[]): Promise<number> {
+    const ids = Array.isArray(bookingIds) ? bookingIds : [bookingIds];
+    if (!ids.length) return 0;
+
+    const bookings = await this.prisma.booking.findMany({
+      where: { id: { in: ids } },
     });
-    if (!booking?.paymentId || booking.paymentStatus !== PAID_STATUS) return;
-    try {
-      const data = await this.call('Cancel', { PaymentId: booking.paymentId });
-      await this.prisma.booking.update({
-        where: { id: bookingId },
-        data: { paymentStatus: data.Status ?? 'REFUNDED' },
-      });
-      this.log.log(`Возврат по записи ${bookingId}: ${data.Status ?? 'ok'}`);
-    } catch {
-      this.log.warn(
-        `Возврат по записи ${bookingId} не прошёл, верните деньги вручную`,
-      );
+    const paid = bookings.filter(
+      (b) => b.paymentId && b.paymentStatus === PAID_STATUS && b.price > 0,
+    );
+    if (!paid.length) return 0;
+
+    const byPayment = new Map<string, typeof paid>();
+    for (const b of paid) {
+      const key = b.paymentId as string;
+      byPayment.set(key, [...(byPayment.get(key) ?? []), b]);
     }
+
+    let refunded = 0;
+    for (const [paymentId, group] of byPayment) {
+      const total = group.reduce((sum, b) => sum + b.price, 0);
+      const covered = await this.prisma.booking.count({ where: { paymentId } });
+      try {
+        const data = await this.call('Cancel', {
+          PaymentId: paymentId,
+          ...(covered > group.length ? { Amount: total * 100 } : {}),
+        });
+        await this.prisma.booking.updateMany({
+          where: { id: { in: group.map((b) => b.id) } },
+          data: { paymentStatus: data.Status ?? 'REFUNDED' },
+        });
+        refunded += total;
+        this.log.log(
+          `Возврат ${total} ₽ по платежу ${paymentId}: ${data.Status ?? 'ok'}`,
+        );
+      } catch {
+        this.log.warn(
+          `Возврат по платежу ${paymentId} не прошёл, верните деньги вручную`,
+        );
+      }
+    }
+    return refunded;
   }
 
   private async applyStatus(bookingId: number, status: string) {
@@ -287,8 +326,7 @@ export class PaymentsService {
     if (
       this.enabled &&
       booking.paymentId &&
-      booking.paymentStatus !== PAID_STATUS &&
-      !FAILED_STATUSES.includes(booking.paymentStatus ?? '')
+      !FINAL_STATUSES.includes(booking.paymentStatus ?? '')
     ) {
       try {
         const data = await this.call('GetState', {
@@ -357,7 +395,7 @@ export class PaymentsService {
         status: 'PENDING',
         price: { gt: 0 },
         paymentId: { not: null },
-        paymentStatus: { notIn: [PAID_STATUS, ...FAILED_STATUSES] },
+        paymentStatus: { notIn: FINAL_STATUSES },
         createdAt: { lt: deadline },
       },
       select: { id: true },

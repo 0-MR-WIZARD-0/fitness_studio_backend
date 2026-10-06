@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -107,6 +108,14 @@ class AnnouncementsService {
     };
   }
 
+  /** Анонс в прошлом бессмысленен: записаться на него уже нельзя */
+  private ensureFuture(dto: UpsertAnnouncementDto) {
+    if (new Date(dto.startsAt).getTime() < Date.now())
+      throw new BadRequestException(
+        'Нельзя поставить анонс в прошлом — выберите время позже текущего',
+      );
+  }
+
   private async ensureNotRented(dto: UpsertAnnouncementDto) {
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(
@@ -127,6 +136,7 @@ class AnnouncementsService {
   }
 
   async create(dto: UpsertAnnouncementDto, admin: SessionAdmin) {
+    this.ensureFuture(dto);
     await this.ensureNotRented(dto);
     const item = await this.prisma.announcement.create({
       data: { ...this.data(dto), createdById: admin.id },
@@ -138,6 +148,7 @@ class AnnouncementsService {
   async update(id: number, dto: UpsertAnnouncementDto, admin: SessionAdmin) {
     const before = await this.ensure(id);
     assertOwnItem(admin, before, 'анонсы');
+    this.ensureFuture(dto);
     await this.ensureNotRented(dto);
     const item = await this.prisma.announcement.update({
       where: { id },

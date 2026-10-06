@@ -57,8 +57,17 @@ class ProfileDto {
   @IsString() @IsNotEmpty({ message: 'Укажите телефон' }) phone: string;
 }
 
+class CancelBookingDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Введите пароль, чтобы подтвердить отмену' })
+  password: string;
+}
+
 class CancelCourseDto {
   @IsString() @IsNotEmpty({ message: 'Курс не указан' }) courseGroupId: string;
+  @IsString()
+  @IsNotEmpty({ message: 'Введите пароль, чтобы подтвердить отмену' })
+  password: string;
 }
 
 class MoveBookingDto {
@@ -201,10 +210,17 @@ export class AccountService {
       booking.userId,
       booking.courseGroupId,
     );
-    if (!promo) return 'Занятие входит в курс — курс перестанет быть полным.';
-    if (giftBooking)
-      return `Занятие входит в курс. Вместе с ним отменится занятие по подарочному промокоду ${promo.code}.`;
-    return `Занятие входит в курс. Подарочный промокод ${promo.code} сгорит.`;
+    const freeze = await this.freeFreeze(booking.userId, booking.courseGroupId);
+
+    const parts = ['Занятие входит в курс — курс перестанет быть полным.'];
+    if (promo)
+      parts.push(
+        giftBooking
+          ? `Вместе с ним отменится занятие по подарочному промокоду ${promo.code}.`
+          : `Подарочный промокод ${promo.code} сгорит.`,
+      );
+    if (freeze) parts.push('Неиспользованная заморозка сгорит.');
+    return parts.join(' ');
   }
 
   private startOf(booking: {
@@ -388,7 +404,27 @@ export class AccountService {
       );
   }
 
-  async cancel(userId: number, bookingId: number) {
+  /** Отмена снимает запись и возвращает деньги, поэтому просим пароль */
+  private async verifyPassword(userId: number, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Войдите в личный кабинет');
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) throw new BadRequestException('Неверный пароль');
+  }
+
+  /** Шаблонное пояснение про сроки: точный срок зависит от банка клиента */
+  private refundNote(amount: number) {
+    if (amount <= 0) return null;
+    return (
+      `Возврат ${amount.toLocaleString('ru-RU')} ₽ отправлен в банк. ` +
+      'Деньги вернутся на ту же карту, которой вы платили: обычно в течение ' +
+      '1–3 рабочих дней, но срок зависит от вашего банка и может доходить ' +
+      'до 30 дней.'
+    );
+  }
+
+  async cancel(userId: number, bookingId: number, password: string) {
+    await this.verifyPassword(userId, password);
     const booking = await this.own(userId, bookingId);
     if (!booking.serviceId) await this.ensureInTime(this.startOf(booking));
 
@@ -396,9 +432,10 @@ export class AccountService {
       where: { id: bookingId },
       data: { status: CANCELLED },
     });
-    await this.payments.refund(bookingId);
+    const refunded = await this.payments.refund(bookingId);
 
     let gift: string | null = null;
+    let burnedFreeze = false;
     if (booking.courseGroupId) {
       const { promo, booking: giftBooking } = await this.giftOf(
         userId,
@@ -413,11 +450,22 @@ export class AccountService {
         await this.prisma.promoCode.delete({ where: { id: promo.id } });
         gift = promo.code;
       }
+      const { count } = await this.prisma.courseFreeze.deleteMany({
+        where: { userId, courseGroupId: booking.courseGroupId, usedAt: null },
+      });
+      burnedFreeze = count > 0;
     }
-    return { ok: true, burnedGift: gift };
+    return {
+      ok: true,
+      burnedGift: gift,
+      burnedFreeze,
+      refunded,
+      refundNote: this.refundNote(refunded),
+    };
   }
 
-  async cancelCourse(userId: number, courseGroupId: string) {
+  async cancelCourse(userId: number, courseGroupId: string, password: string) {
+    await this.verifyPassword(userId, password);
     const { courseHours } = await this.limits();
     const bookings = await this.prisma.booking.findMany({
       where: { userId, courseGroupId, status: { not: CANCELLED } },
@@ -446,7 +494,7 @@ export class AccountService {
       });
     if (promo) await this.prisma.promoCode.delete({ where: { id: promo.id } });
 
-    for (const b of bookings) await this.payments.refund(b.id);
+    const refunded = await this.payments.refund(bookings.map((b) => b.id));
     await this.prisma.booking.updateMany({
       where: { id: { in: bookings.map((b) => b.id) } },
       data: { status: CANCELLED },
@@ -459,6 +507,8 @@ export class AccountService {
       ok: true,
       cancelled: bookings.length + (giftBooking ? 1 : 0),
       burnedGift: promo?.code ?? null,
+      refunded,
+      refundNote: this.refundNote(refunded),
     };
   }
 
@@ -616,10 +666,17 @@ class AccountController {
     return this.account.freezes(currentUserId(req));
   }
 
-  @UseGuards(UserGuard)
+  @UseGuards(
+    UserGuard,
+    RateLimit(10, 10 * 60_000, 'Слишком много попыток — подождите немного'),
+  )
   @Post('courses/cancel')
   cancelCourse(@Body() dto: CancelCourseDto, @Req() req: Request) {
-    return this.account.cancelCourse(currentUserId(req), dto.courseGroupId);
+    return this.account.cancelCourse(
+      currentUserId(req),
+      dto.courseGroupId,
+      dto.password,
+    );
   }
 
   @UseGuards(UserGuard)
@@ -628,10 +685,17 @@ class AccountController {
     return this.account.freeze(currentUserId(req), id);
   }
 
-  @UseGuards(UserGuard)
+  @UseGuards(
+    UserGuard,
+    RateLimit(10, 10 * 60_000, 'Слишком много попыток — подождите немного'),
+  )
   @Post('bookings/:id/cancel')
-  cancel(@Param('id', IdPipe) id: number, @Req() req: Request) {
-    return this.account.cancel(currentUserId(req), id);
+  cancel(
+    @Param('id', IdPipe) id: number,
+    @Body() dto: CancelBookingDto,
+    @Req() req: Request,
+  ) {
+    return this.account.cancel(currentUserId(req), id, dto.password);
   }
 
   @UseGuards(UserGuard)

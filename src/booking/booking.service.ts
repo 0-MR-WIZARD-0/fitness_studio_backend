@@ -187,6 +187,14 @@ export class BookingService {
     });
   }
 
+  /** Занятие в прошлом создать нельзя: на него уже никто не запишется */
+  private ensureFuture(startsAt: Date, verb: 'создать' | 'перенести') {
+    if (startsAt.getTime() < Date.now())
+      throw new BadRequestException(
+        `Нельзя ${verb} занятие в прошлом — выберите время позже текущего`,
+      );
+  }
+
   async createSlot(dto: CreateSlotDto, admin: SessionAdmin) {
     if (!dto.isDiagnostic && !dto.formatId)
       throw new BadRequestException('Для занятия нужен формат');
@@ -195,6 +203,7 @@ export class BookingService {
     const hall = await this.ensureHall(dto.hallId);
 
     const startsAt = new Date(dto.startsAt);
+    this.ensureFuture(startsAt, 'создать');
     const durationMin =
       dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
     await this.ensureNotRented(startsAt, durationMin, hall.id);
@@ -297,6 +306,7 @@ export class BookingService {
     const isReschedule = startsAt.getTime() !== slot.startsAt.getTime();
 
     if (isReschedule) {
+      this.ensureFuture(startsAt, 'перенести');
       if (!dto.notified)
         throw new BadRequestException(
           'Подтвердите, что клиенты уведомлены о переносе',
@@ -351,7 +361,7 @@ export class BookingService {
         where: { slotId: id },
         data: { status: 'CANCELLED' },
       });
-      for (const b of paid) await this.payments.refund(b.id);
+      await this.payments.refund(paid.map((b) => b.id));
     }
 
     await this.prisma.slot.delete({ where: { id } });
