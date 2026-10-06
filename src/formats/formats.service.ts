@@ -127,6 +127,7 @@ export class FormatsService {
       durationMin: dto.durationMin,
       order: dto.order,
       isActive: true,
+      isExtra: dto.isExtra,
     };
   }
 

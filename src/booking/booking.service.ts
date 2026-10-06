@@ -187,7 +187,6 @@ export class BookingService {
     });
   }
 
-  /** Занятие в прошлом создать нельзя: на него уже никто не запишется */
   private ensureFuture(startsAt: Date, verb: 'создать' | 'перенести') {
     if (startsAt.getTime() < Date.now())
       throw new BadRequestException(

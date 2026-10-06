@@ -108,7 +108,6 @@ class AnnouncementsService {
     };
   }
 
-  /** Анонс в прошлом бессмысленен: записаться на него уже нельзя */
   private ensureFuture(dto: UpsertAnnouncementDto) {
     if (new Date(dto.startsAt).getTime() < Date.now())
       throw new BadRequestException(

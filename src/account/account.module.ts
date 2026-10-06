@@ -404,7 +404,6 @@ export class AccountService {
       );
   }
 
-  /** Отмена снимает запись и возвращает деньги, поэтому просим пароль */
   private async verifyPassword(userId: number, password: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('Войдите в личный кабинет');
@@ -412,7 +411,6 @@ export class AccountService {
     if (!ok) throw new BadRequestException('Неверный пароль');
   }
 
-  /** Шаблонное пояснение про сроки: точный срок зависит от банка клиента */
   private refundNote(amount: number) {
     if (amount <= 0) return null;
     return (

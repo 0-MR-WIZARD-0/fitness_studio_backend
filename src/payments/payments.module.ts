@@ -19,7 +19,6 @@ import { IdPipe } from '../common/id.pipe';
 
 const PAID_STATUS = 'CONFIRMED';
 
-/** Платёж не состоялся: деньги не списаны, запись надо снять */
 const FAILED_STATUSES = [
   'REJECTED',
   'DEADLINE_EXPIRED',
@@ -27,11 +26,6 @@ const FAILED_STATUSES = [
   'REVERSED',
 ];
 
-/**
- * Возврат мы инициируем сами и сами же проставляем статусы записей, поэтому
- * по уведомлению о возврате трогать записи нельзя: частичный возврат одного
- * занятия иначе снял бы весь курс, оплаченный тем же платежом.
- */
 const REFUND_STATUSES = ['REFUNDED', 'PARTIAL_REFUNDED'];
 
 const FINAL_STATUSES = [PAID_STATUS, ...FAILED_STATUSES, ...REFUND_STATUSES];
@@ -229,11 +223,6 @@ export class PaymentsService {
     return { state: 'pending' as const, url: booking.paymentUrl };
   }
 
-  /**
-   * Возврат за указанные записи. Курс и корзина оплачиваются одним платежом,
-   * поэтому возвращаем не весь платёж, а только стоимость тех записей, которые
-   * действительно отменяют. Возвращает сумму возврата в рублях.
-   */
   async refund(bookingIds: number | number[]): Promise<number> {
     const ids = Array.isArray(bookingIds) ? bookingIds : [bookingIds];
     if (!ids.length) return 0;

@@ -33,6 +33,7 @@ export class UpsertFormatDto {
   @IsOptional() @IsInt() @Min(5) durationMin?: number;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsBoolean() isExtra?: boolean;
 
   @IsOptional()
   @IsArray()
