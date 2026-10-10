@@ -12,6 +12,7 @@ import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromoService } from '../promo/promo.service';
 import { courseGroups } from './course';
+import { servicePrice } from '../services/services.module';
 import { MailService } from '../mail/mail.service';
 import { AuthService } from '../auth/auth.service';
 import { RentService } from '../rent/rent.module';
@@ -136,16 +137,21 @@ export class BookingService {
     return this.mapAvailable({ isDiagnostic: true });
   }
 
-  private async prices() {
+  /** сколько занятий подряд образуют курс — это единственная общая настройка */
+  private async courseThreshold() {
     const s = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
-    return {
-      single: s?.pricePerSession ?? 5000,
-      threshold: Math.max(1, s?.courseThreshold ?? 3),
-    };
+    return Math.max(1, s?.courseThreshold ?? 3);
+  }
+
+  /** цена занятия живёт в формате; диагностика всегда бесплатна */
+  private slotPrice(slot: {
+    isDiagnostic: boolean;
+    format: { price: number } | null;
+  }) {
+    return slot.isDiagnostic ? 0 : (slot.format?.price ?? 0);
   }
 
   private async mapAvailable(where: Record<string, unknown>) {
-    const { single } = await this.prices();
     const slots = await this.prisma.slot.findMany({
       where: { startsAt: { gte: new Date() }, ...where },
       orderBy: { startsAt: 'asc' },
@@ -168,7 +174,8 @@ export class BookingService {
       trainerName: s.trainer?.name ?? null,
       hallId: s.hallId,
       hallName: s.hall?.title ?? null,
-      pricePerSession: s.isDiagnostic ? 0 : single,
+      pricePerSession: this.slotPrice(s),
+      inCourse: !s.isDiagnostic && (s.format?.inCourse ?? false),
       taken: s._count.bookings,
       remaining: Math.max(0, s.capacity - s._count.bookings),
     }));
@@ -187,6 +194,16 @@ export class BookingService {
     });
   }
 
+  /** У формата без расписания записи нет — занятия ему ставить нельзя */
+  private ensureScheduled(
+    format: { name: string; inSchedule: boolean } | null,
+  ) {
+    if (format && !format.inSchedule)
+      throw new BadRequestException(
+        `У формата «${format.name}» выключено расписание — занятия ему ставить нельзя`,
+      );
+  }
+
   private ensureFuture(startsAt: Date, verb: 'создать' | 'перенести') {
     if (startsAt.getTime() < Date.now())
       throw new BadRequestException(
@@ -201,6 +218,7 @@ export class BookingService {
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
     const hall = await this.ensureHall(dto.hallId);
 
+    this.ensureScheduled(format);
     const startsAt = new Date(dto.startsAt);
     this.ensureFuture(startsAt, 'создать');
     const durationMin =
@@ -216,7 +234,7 @@ export class BookingService {
         createdById: admin.id,
         startsAt,
         durationMin,
-        capacity: dto.capacity ?? 7,
+        capacity: format?.capacity ?? dto.capacity ?? 7,
         isDiagnostic: dto.isDiagnostic ?? false,
       },
     });
@@ -230,6 +248,7 @@ export class BookingService {
     const format = dto.formatId ? await this.ensureFormat(dto.formatId) : null;
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
     const hall = await this.ensureHall(dto.hallId);
+    this.ensureScheduled(format);
     const durationMin =
       dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
     const [h, m] = dto.time.split(':').map(Number);
@@ -259,7 +278,7 @@ export class BookingService {
         createdById: admin.id,
         startsAt: new Date(d),
         durationMin,
-        capacity: dto.capacity ?? 7,
+        capacity: format?.capacity ?? dto.capacity ?? 7,
         isDiagnostic: dto.isDiagnostic ?? false,
       });
     }
@@ -375,7 +394,6 @@ export class BookingService {
       throw new UnauthorizedException(
         'Промокод работает в личном кабинете — войдите',
       );
-    const { single } = await this.prices();
     const waiting = this.known(user, dto);
     if (waiting) {
       const hit = await this.resumeUnpaid({ slotId: dto.slotId }, waiting);
@@ -407,7 +425,7 @@ export class BookingService {
       if (slot._count.bookings >= slot.capacity)
         throw new ConflictException('Свободных мест нет');
 
-      const base = slot.isDiagnostic ? 0 : single;
+      const base = this.slotPrice(slot);
       const free = slot.isDiagnostic || !!promo;
       const price = free ? 0 : base;
 
@@ -467,7 +485,7 @@ export class BookingService {
           payment: { status: 'tinkoff', redirectUrl: hit.url },
         };
     }
-    const { single, threshold } = await this.prices();
+    const threshold = await this.courseThreshold();
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       const slots = await tx.slot.findMany({
@@ -494,8 +512,10 @@ export class BookingService {
           `занятие ${s.startsAt.toLocaleString('ru-RU')}`,
         );
       }
-
-      const { groups, countedIds } = courseGroups(slots, threshold);
+      const { groups, countedIds } = courseGroups(
+        slots.filter((s) => s.format?.inCourse),
+        threshold,
+      );
       const groupIdBySlot = new Map<number, string>();
       for (const group of groups) {
         const groupId = randomUUID();
@@ -505,7 +525,7 @@ export class BookingService {
       let total = 0;
       const bookingIds: number[] = [];
       for (const s of slots) {
-        const price = single;
+        const price = this.slotPrice(s);
         total += price;
         const created = await tx.booking.create({
           data: {
@@ -522,6 +542,29 @@ export class BookingService {
         });
         bookingIds.push(created.id);
       }
+      for (const pick of dto.services ?? []) {
+        const service = await tx.service.findUnique({
+          where: { id: pick.serviceId },
+        });
+        if (!service || !service.isActive)
+          throw new NotFoundException('Дополнительная услуга не найдена');
+        const price = servicePrice(service, pick.period);
+        total += price;
+        const created = await tx.booking.create({
+          data: {
+            userId: user.id,
+            serviceId: service.id,
+            name: user.name,
+            phone: user.phone,
+            email: user.email,
+            price,
+            isFree: price === 0,
+            servicePeriod: pick.period ?? 'single',
+          },
+        });
+        bookingIds.push(created.id);
+      }
+
       return {
         courses: groups.length,
         groupIds: [...new Set(groupIdBySlot.values())],

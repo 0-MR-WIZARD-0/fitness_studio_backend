@@ -31,6 +31,12 @@ export class UpsertFormatDto {
   @IsOptional() @IsString() previewImageUrl?: string | null;
   @IsOptional() @IsString() heroImageUrl?: string | null;
   @IsOptional() @IsInt() @Min(5) durationMin?: number;
+  @IsOptional() @IsInt() @Min(0) price?: number;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsBoolean() inCourse?: boolean;
+  @IsOptional() @IsBoolean() inSchedule?: boolean;
+  @IsOptional() @IsString() contactUrl?: string;
+  @IsOptional() @IsString() scheduleNote?: string;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsBoolean() isExtra?: boolean;

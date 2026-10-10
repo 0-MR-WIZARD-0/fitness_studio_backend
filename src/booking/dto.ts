@@ -1,14 +1,17 @@
+import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsDateString,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 export class CreateSlotDto {
@@ -58,9 +61,21 @@ export class SingleBookingDto {
   @IsOptional() @IsString() phone?: string;
 }
 
+export class CartServiceDto {
+  @IsInt() serviceId: number;
+  @IsOptional()
+  @IsIn(['single', 'week', 'month'])
+  period?: 'single' | 'week' | 'month';
+}
+
 export class CartBookingDto {
   @IsArray() @ArrayNotEmpty() @IsInt({ each: true }) slotIds: number[];
   @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CartServiceDto)
+  services?: CartServiceDto[];
 }
 
 export class AnnouncementBookingDto {

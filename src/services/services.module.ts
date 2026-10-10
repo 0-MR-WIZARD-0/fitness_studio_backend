@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -17,6 +18,7 @@ import type { Request } from 'express';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -24,6 +26,10 @@ import {
   Min,
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** сроки, на которые можно взять дополнительную услугу */
+export const PERIODS = ['single', 'week', 'month'] as const;
+export type ServicePeriod = (typeof PERIODS)[number];
 import {
   AuthenticatedGuard,
   TrainerAllowed,
@@ -49,13 +55,42 @@ class UpsertServiceDto {
   title: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsInt() @Min(0) price?: number;
+  @IsOptional() @IsInt() @Min(0) priceWeek?: number | null;
+  @IsOptional() @IsInt() @Min(0) priceMonth?: number | null;
+  @IsOptional() @IsBoolean() isFree?: boolean;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 class OrderServiceDto {
   @IsInt() serviceId: number;
+  @IsOptional() @IsIn(PERIODS) period?: ServicePeriod;
   @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
+}
+
+/**
+ * Цена выбранного срока. Незаполненный срок выбрать нельзя — значит такого
+ * предложения у услуги нет.
+ */
+export function servicePrice(
+  service: {
+    price: number;
+    priceWeek: number | null;
+    priceMonth: number | null;
+    isFree: boolean;
+  },
+  period?: ServicePeriod | null,
+): number {
+  if (service.isFree) return 0;
+  const byPeriod: Record<ServicePeriod, number | null> = {
+    single: service.price,
+    week: service.priceWeek,
+    month: service.priceMonth,
+  };
+  const value = byPeriod[period ?? 'single'];
+  if (value == null)
+    throw new BadRequestException('Для услуги не задана цена за этот срок');
+  return value;
 }
 
 @Injectable()
@@ -71,6 +106,9 @@ export class ServicesService {
       title: dto.title.trim(),
       description: dto.description ?? '',
       price: dto.price ?? 0,
+      priceWeek: dto.priceWeek ?? null,
+      priceMonth: dto.priceMonth ?? null,
+      isFree: dto.isFree ?? false,
       durationMin: null,
       order: dto.order ?? 0,
       isActive: dto.isActive ?? true,
@@ -117,6 +155,7 @@ export class ServicesService {
     });
     if (!service || !service.isActive)
       throw new NotFoundException('Услуга не найдена');
+    const price = servicePrice(service, dto.period);
 
     const booking = await this.prisma.booking.create({
       data: {
@@ -125,16 +164,17 @@ export class ServicesService {
         name: user.name,
         phone: user.phone,
         email: user.email,
-        price: service.price,
-        isFree: service.price === 0,
+        price,
+        isFree: price === 0,
+        servicePeriod: dto.period ?? 'single',
       },
     });
 
     const payment =
-      service.price > 0
+      price > 0
         ? await this.payments.start({
             id: booking.id,
-            price: service.price,
+            price,
             name: booking.name,
             phone: booking.phone,
             email: booking.email,
@@ -142,7 +182,7 @@ export class ServicesService {
           })
         : { status: 'free', redirectUrl: null };
 
-    return { bookingId: booking.id, total: service.price, payment };
+    return { bookingId: booking.id, total: price, payment };
   }
 
   private async ensure(id: number) {

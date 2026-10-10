@@ -217,9 +217,15 @@ model Format {
   previewImageUrl String?
   heroImageUrl    String?
   durationMin     Int      @default(60)
+  price           Int      @default(0)
+  capacity        Int      @default(7)
+  inCourse        Boolean  @default(true)
   order           Int      @default(0)
   isActive        Boolean  @default(true)
   isExtra         Boolean  @default(false)
+  inSchedule      Boolean  @default(true)
+  contactUrl      String   @default("")
+  scheduleNote    String   @default("")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -383,6 +389,9 @@ model Service {
   title       String
   description String   @default("")
   price       Int      @default(0)
+  priceWeek   Int?
+  priceMonth  Int?
+  isFree      Boolean  @default(false)
   durationMin Int?
   order       Int      @default(0)
   isActive    Boolean  @default(true)
@@ -437,6 +446,7 @@ model Booking {
   email          String?
   isCourse       Boolean       @default(false)
   isDiagnostic   Boolean       @default(false)
+  servicePeriod  String?
   courseGroupId  String?
   price          Int           @default(0)
   isFree         Boolean       @default(false)
@@ -502,8 +512,6 @@ model SiteSettings {
   phone             String   @default("8-888-888-88-88")
   email             String   @default("test@mail.ru")
   courseThreshold   Int      @default(3)
-  pricePerSession   Int      @default(5000)
-  priceCourse       Int      @default(4000)
   userAgreementUrl  String   @default("")
   telegramUrl       String   @default("")
   maxUrl            String   @default("")
