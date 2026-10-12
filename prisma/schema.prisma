@@ -392,6 +392,8 @@ model Service {
   priceWeek   Int?
   priceMonth  Int?
   isFree      Boolean  @default(false)
+  byAgreement Boolean  @default(false)
+  contactUrl  String   @default("")
   durationMin Int?
   order       Int      @default(0)
   isActive    Boolean  @default(true)

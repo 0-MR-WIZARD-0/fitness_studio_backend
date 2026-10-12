@@ -27,7 +27,6 @@ import {
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** сроки, на которые можно взять дополнительную услугу */
 export const PERIODS = ['single', 'week', 'month'] as const;
 export type ServicePeriod = (typeof PERIODS)[number];
 import {
@@ -58,6 +57,8 @@ class UpsertServiceDto {
   @IsOptional() @IsInt() @Min(0) priceWeek?: number | null;
   @IsOptional() @IsInt() @Min(0) priceMonth?: number | null;
   @IsOptional() @IsBoolean() isFree?: boolean;
+  @IsOptional() @IsBoolean() byAgreement?: boolean;
+  @IsOptional() @IsString() contactUrl?: string;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -68,10 +69,6 @@ class OrderServiceDto {
   @IsOptional() @IsArray() @IsInt({ each: true }) documentIds?: number[];
 }
 
-/**
- * Цена выбранного срока. Незаполненный срок выбрать нельзя — значит такого
- * предложения у услуги нет.
- */
 export function servicePrice(
   service: {
     price: number;
@@ -109,6 +106,8 @@ export class ServicesService {
       priceWeek: dto.priceWeek ?? null,
       priceMonth: dto.priceMonth ?? null,
       isFree: dto.isFree ?? false,
+      byAgreement: dto.byAgreement ?? false,
+      contactUrl: dto.contactUrl?.trim() ?? '',
       durationMin: null,
       order: dto.order ?? 0,
       isActive: dto.isActive ?? true,
@@ -155,6 +154,10 @@ export class ServicesService {
     });
     if (!service || !service.isActive)
       throw new NotFoundException('Услуга не найдена');
+    if (service.byAgreement)
+      throw new BadRequestException(
+        'Эта услуга оформляется по согласованию — свяжитесь со студией',
+      );
     const price = servicePrice(service, dto.period);
 
     const booking = await this.prisma.booking.create({

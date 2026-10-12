@@ -137,13 +137,11 @@ export class BookingService {
     return this.mapAvailable({ isDiagnostic: true });
   }
 
-  /** сколько занятий подряд образуют курс — это единственная общая настройка */
   private async courseThreshold() {
     const s = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
     return Math.max(1, s?.courseThreshold ?? 3);
   }
 
-  /** цена занятия живёт в формате; диагностика всегда бесплатна */
   private slotPrice(slot: {
     isDiagnostic: boolean;
     format: { price: number } | null;
@@ -194,7 +192,6 @@ export class BookingService {
     });
   }
 
-  /** У формата без расписания записи нет — занятия ему ставить нельзя */
   private ensureScheduled(
     format: { name: string; inSchedule: boolean } | null,
   ) {
@@ -548,6 +545,10 @@ export class BookingService {
         });
         if (!service || !service.isActive)
           throw new NotFoundException('Дополнительная услуга не найдена');
+        if (service.byAgreement)
+          throw new BadRequestException(
+            `Услуга «${service.title}» оформляется по согласованию — свяжитесь со студией`,
+          );
         const price = servicePrice(service, pick.period);
         total += price;
         const created = await tx.booking.create({
