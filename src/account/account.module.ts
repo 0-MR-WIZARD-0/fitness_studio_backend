@@ -241,7 +241,7 @@ export class AccountService {
       where: { userId },
       orderBy: { createdAt: 'desc' },
       include: {
-        slot: { include: { format: true, trainer: true } },
+        slot: { include: { format: true, service: true, trainer: true } },
         format: true,
         announcement: { include: { trainer: true } },
         rentalSlot: { include: { service: { select: { title: true } } } },
@@ -281,6 +281,7 @@ export class AccountService {
               ? (b.rentalSlot.service?.title ?? 'Аренда студии')
               : (b.announcement?.title ??
                 b.slot?.format?.name ??
+                b.slot?.service?.title ??
                 b.format?.name ??
                 (b.isDiagnostic ? 'Диагностика' : 'Занятие'))),
           startsAt,

@@ -336,7 +336,7 @@ export class PaymentsService {
       ? await this.prisma.booking.findMany({
           where: { paymentId: booking.paymentId },
           include: {
-            slot: { include: { format: true } },
+            slot: { include: { format: true, service: true } },
             announcement: true,
             service: true,
             rentalSlot: { include: { hall: true } },
@@ -349,6 +349,7 @@ export class PaymentsService {
       title: b.slot?.isDiagnostic
         ? 'Диагностика'
         : (b.slot?.format?.name ??
+          b.slot?.service?.title ??
           b.announcement?.title ??
           b.service?.title ??
           (b.rentalSlot
