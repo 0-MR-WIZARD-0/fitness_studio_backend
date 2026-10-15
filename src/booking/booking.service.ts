@@ -145,11 +145,8 @@ export class BookingService {
   private slotPrice(slot: {
     isDiagnostic: boolean;
     format: { price: number } | null;
-    service?: { price: number; isFree: boolean } | null;
   }) {
-    if (slot.isDiagnostic) return 0;
-    if (slot.service) return slot.service.isFree ? 0 : slot.service.price;
-    return slot.format?.price ?? 0;
+    return slot.isDiagnostic ? 0 : (slot.format?.price ?? 0);
   }
 
   private async mapAvailable(where: Record<string, unknown>) {
@@ -158,7 +155,6 @@ export class BookingService {
       orderBy: { startsAt: 'asc' },
       include: {
         format: true,
-        service: true,
         trainer: true,
         hall: true,
         _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
@@ -171,8 +167,7 @@ export class BookingService {
       capacity: s.capacity,
       formatId: s.formatId,
       isDiagnostic: s.isDiagnostic,
-      formatName: s.format?.name ?? s.service?.title ?? null,
-      serviceId: s.serviceId,
+      formatName: s.format?.name ?? null,
       trainerId: s.trainerId,
       trainerName: s.trainer?.name ?? null,
       hallId: s.hallId,
@@ -189,7 +184,6 @@ export class BookingService {
       orderBy: { startsAt: 'asc' },
       include: {
         format: true,
-        service: true,
         trainer: true,
         hall: true,
         bookings: { where: ACTIVE_BOOKINGS },
@@ -207,17 +201,6 @@ export class BookingService {
       );
   }
 
-  private async ensureAgreedService(id: number) {
-    const service = await this.prisma.service.findUnique({ where: { id } });
-    if (!service || !service.isActive)
-      throw new NotFoundException('Дополнительная услуга не найдена');
-    if (!service.byAgreement)
-      throw new BadRequestException(
-        `Услугу «${service.title}» клиент оплачивает сам — в расписание её ставить не нужно`,
-      );
-    return service;
-  }
-
   private ensureFuture(startsAt: Date, verb: 'создать' | 'перенести') {
     if (startsAt.getTime() < Date.now())
       throw new BadRequestException(
@@ -226,12 +209,9 @@ export class BookingService {
   }
 
   async createSlot(dto: CreateSlotDto, admin: SessionAdmin) {
-    if (!dto.isDiagnostic && !dto.formatId && !dto.serviceId)
-      throw new BadRequestException('Для занятия нужен формат или услуга');
+    if (!dto.isDiagnostic && !dto.formatId)
+      throw new BadRequestException('Для занятия нужен формат');
     const format = dto.formatId ? await this.ensureFormat(dto.formatId) : null;
-    const service = dto.serviceId
-      ? await this.ensureAgreedService(dto.serviceId)
-      : null;
     if (dto.trainerId) await this.ensureTrainer(dto.trainerId);
     const hall = await this.ensureHall(dto.hallId);
 
@@ -239,23 +219,19 @@ export class BookingService {
     const startsAt = new Date(dto.startsAt);
     this.ensureFuture(startsAt, 'создать');
     const durationMin =
-      dto.durationMin ??
-      (dto.isDiagnostic
-        ? 30
-        : (service?.durationMin ?? format?.durationMin ?? 60));
+      dto.durationMin ?? (dto.isDiagnostic ? 30 : (format?.durationMin ?? 60));
     await this.ensureNotRented(startsAt, durationMin, hall.id);
     await this.ensureTrainerFree(dto.trainerId ?? null, startsAt, durationMin);
 
     const slot = await this.prisma.slot.create({
       data: {
-        formatId: dto.isDiagnostic || service ? null : dto.formatId,
-        serviceId: service?.id ?? null,
+        formatId: dto.isDiagnostic ? null : dto.formatId,
         trainerId: dto.trainerId ?? null,
         hallId: hall.id,
         createdById: admin.id,
         startsAt,
         durationMin,
-        capacity: format?.capacity ?? dto.capacity ?? (service ? 1 : 7),
+        capacity: format?.capacity ?? dto.capacity ?? 7,
         isDiagnostic: dto.isDiagnostic ?? false,
       },
     });
@@ -433,7 +409,6 @@ export class BookingService {
         where: { id: dto.slotId },
         include: {
           format: true,
-          service: true,
           _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
         },
       });
@@ -478,7 +453,7 @@ export class BookingService {
           isFree: free,
           promoCodeId: promo?.id,
         },
-        include: { slot: { include: { format: true, service: true } } },
+        include: { slot: { include: { format: true } } },
       });
       return { booking, free, price };
     });
@@ -488,9 +463,7 @@ export class BookingService {
       result.booking,
       result.free,
       result.price,
-      slot?.isDiagnostic
-        ? 'Диагностика'
-        : (slot?.format?.name ?? slot?.service?.title ?? 'Занятие'),
+      slot?.isDiagnostic ? 'Диагностика' : (slot?.format?.name ?? 'Занятие'),
     );
   }
 
@@ -516,7 +489,6 @@ export class BookingService {
         where: { id: { in: ids }, isDiagnostic: false },
         include: {
           format: true,
-          service: true,
           _count: { select: { bookings: { where: ACTIVE_BOOKINGS } } },
         },
       });
@@ -573,10 +545,6 @@ export class BookingService {
         });
         if (!service || !service.isActive)
           throw new NotFoundException('Дополнительная услуга не найдена');
-        if (service.byAgreement)
-          throw new BadRequestException(
-            `Услуга «${service.title}» оформляется по согласованию — свяжитесь со студией`,
-          );
         const price = servicePrice(service, pick.period);
         total += price;
         const created = await tx.booking.create({

@@ -348,9 +348,6 @@ model Slot {
   hallId Int?
   hall   Hall? @relation(fields: [hallId], references: [id], onDelete: SetNull)
 
-  serviceId Int?
-  service   Service? @relation("ServiceLessons", fields: [serviceId], references: [id], onDelete: SetNull)
-
   bookings Booking[]
 
   createdById Int?
@@ -395,8 +392,6 @@ model Service {
   priceWeek   Int?
   priceMonth  Int?
   isFree      Boolean  @default(false)
-  byAgreement Boolean  @default(false)
-  contactUrl  String   @default("")
   durationMin Int?
   order       Int      @default(0)
   isActive    Boolean  @default(true)
@@ -404,7 +399,6 @@ model Service {
   updatedAt   DateTime @updatedAt
 
   slots    RentalSlot[]
-  lessons  Slot[]       @relation("ServiceLessons")
   bookings Booking[]
 
   createdById Int?

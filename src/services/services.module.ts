@@ -57,8 +57,6 @@ class UpsertServiceDto {
   @IsOptional() @IsInt() @Min(0) priceWeek?: number | null;
   @IsOptional() @IsInt() @Min(0) priceMonth?: number | null;
   @IsOptional() @IsBoolean() isFree?: boolean;
-  @IsOptional() @IsBoolean() byAgreement?: boolean;
-  @IsOptional() @IsString() contactUrl?: string;
   @IsOptional() @IsInt() order?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -106,8 +104,6 @@ export class ServicesService {
       priceWeek: dto.priceWeek ?? null,
       priceMonth: dto.priceMonth ?? null,
       isFree: dto.isFree ?? false,
-      byAgreement: dto.byAgreement ?? false,
-      contactUrl: dto.contactUrl?.trim() ?? '',
       durationMin: null,
       order: dto.order ?? 0,
       isActive: dto.isActive ?? true,
@@ -154,10 +150,6 @@ export class ServicesService {
     });
     if (!service || !service.isActive)
       throw new NotFoundException('Услуга не найдена');
-    if (service.byAgreement)
-      throw new BadRequestException(
-        'Эта услуга оформляется по согласованию — свяжитесь со студией',
-      );
     const price = servicePrice(service, dto.period);
 
     const booking = await this.prisma.booking.create({

@@ -49,6 +49,7 @@ import {
   BODY_TYPES,
   GIRTH_FIELDS,
   ZONE_TABLES,
+  conclusionText,
   derive,
 } from './protocol';
 import type { BodyType, Sex } from './protocol';
@@ -317,6 +318,18 @@ export class ClientsService {
     return this.card(userId);
   }
 
+  async preview(userId: number, dto: MeasurementDto) {
+    const card = await this.prisma.clientCard.findUnique({ where: { userId } });
+    const basics = {
+      sex: card?.sex ?? null,
+      birthDate: card?.birthDate ?? null,
+      heightCm: card?.heightCm ?? null,
+      bodyType: card?.bodyType ?? null,
+    };
+    const derived = derive(basics, this.measurementData(dto));
+    return { derived, text: conclusionText(derived.conclusion) };
+  }
+
   private async ensureCard(userId: number, admin: SessionAdmin) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Клиент не найден');
@@ -545,6 +558,15 @@ class ClientsController {
     @Req() req: Request,
   ) {
     return this.clients.saveCard(userId, dto, currentAdmin(req));
+  }
+
+  @UseGuards(AuthenticatedGuard)
+  @Post('admin/:userId/preview')
+  preview(
+    @Param('userId', IdPipe) userId: number,
+    @Body() dto: MeasurementDto,
+  ) {
+    return this.clients.preview(userId, dto);
   }
 
   @UseGuards(AuthenticatedGuard)

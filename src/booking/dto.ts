@@ -16,7 +16,6 @@ import {
 
 export class CreateSlotDto {
   @IsOptional() @IsInt() formatId?: number;
-  @IsOptional() @IsInt() serviceId?: number;
   @IsOptional() @IsInt() trainerId?: number | null;
   @IsOptional() @IsInt() hallId?: number | null;
   @IsDateString() startsAt: string;

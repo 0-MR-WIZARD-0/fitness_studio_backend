@@ -190,7 +190,7 @@ export class RentService {
           startsAt: { gte: since, lte: until },
           ...(hallId ? { OR: [{ hallId: null }, { hallId }] } : {}),
         },
-        include: { format: true, service: true },
+        include: { format: true },
       }),
       this.prisma.announcement.findMany({
         where: { isActive: true, startsAt: { gte: since, lte: until } },
@@ -201,7 +201,7 @@ export class RentService {
       ...lessons.map((s) => ({
         startsAt: s.startsAt,
         durationMin: s.durationMin,
-        name: s.format?.name ?? s.service?.title ?? 'диагностика',
+        name: s.format?.name ?? 'диагностика',
       })),
       ...announcements.map((a) => ({
         startsAt: a.startsAt,

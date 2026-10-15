@@ -146,10 +146,43 @@ export function bmiZone(bmi: number): Zone {
 }
 
 export function fatZone(pct: number, sex: Sex | null): Zone {
-  const [min, max] = sex === 'MALE' ? [12, 20] : [20, 28];
+  const [min, max, limit] = sex === 'MALE' ? [12, 20, 25] : [20, 28, 35];
   if (pct < min) return zone('low', 'Ниже нормы');
   if (pct <= max) return zone('norm', 'Норма');
-  return zone('high', 'Выше нормы');
+  if (pct <= limit) return zone('warn', 'Выше нормы');
+  return zone('high', 'Высокий');
+}
+
+export function waistZone(cm: number, sex: Sex | null): Zone {
+  const bounds = sex === 'MALE' ? [94, 102] : [80, 88];
+  if (cm < bounds[0]) return zone('norm', 'Норма');
+  if (cm <= bounds[1]) return zone('warn', 'Повышенный риск');
+  return zone('high', 'Высокий риск');
+}
+
+export const MUSCLE_MIN_PCT = { FEMALE: 35, MALE: 40 };
+
+export function musclePct(muscleKg: number, weightKg: number | null) {
+  if (!weightKg || weightKg <= 0) return null;
+  return round((muscleKg / weightKg) * 100, 1);
+}
+
+export function muscleZone(
+  muscleKg: number,
+  weightKg: number | null,
+  sex: Sex | null,
+): Zone | null {
+  const pct = musclePct(muscleKg, weightKg);
+  if (pct == null) return null;
+  const min = sex === 'MALE' ? MUSCLE_MIN_PCT.MALE : MUSCLE_MIN_PCT.FEMALE;
+  return pct < min ? zone('warn', 'Ниже нормы') : zone('norm', 'Норма');
+}
+
+export function metabolicAgeZone(metabolicAge: number, age: number | null) {
+  if (age == null) return null;
+  return metabolicAge > age
+    ? zone('warn', 'Выше фактического')
+    : zone('norm', 'Норма');
 }
 
 export function waterZone(pct: number, sex: Sex | null): Zone {
@@ -208,8 +241,206 @@ export interface MeasurementNumbers {
   hipsCm: number | null;
   weightKg: number | null;
   fatPct: number | null;
+  muscleKg: number | null;
   waterPct: number | null;
   visceralFat: number | null;
+  boneKg: number | null;
+  metabolicAge: number | null;
+  bmr: number | null;
+}
+
+interface Verdict {
+  text: string;
+  risk?: string;
+  solution?: string;
+}
+
+const VERDICTS: Record<string, Partial<Record<ZoneLevel, Verdict>>> = {
+  waist: {
+    norm: {
+      text: 'Объём талии в безопасной зоне, риск метаболических заболеваний минимальный.',
+    },
+    warn: {
+      text: 'Абдоминальный жир начинает накапливаться.',
+      risk: 'Повышение давления, риск диабета.',
+      solution:
+        'Контроль питания, меньше простых углеводов, добавить кардионагрузку.',
+    },
+    high: {
+      text: 'Висцеральное ожирение: жир откладывается вокруг внутренних органов.',
+      risk: 'Сердечно-сосудистые заболевания, диабет 2 типа.',
+      solution: 'Дефицит калорий и обязательная регулярная кардионагрузка.',
+    },
+  },
+  whr: {
+    norm: {
+      text: 'Отличное распределение жира — тип «груша» или «песочные часы», риск сердечно-сосудистых заболеваний низкий.',
+    },
+    warn: {
+      text: 'Жир начинает откладываться в области живота.',
+      risk: 'Метаболический синдром.',
+      solution: 'Акцент на жиросжигание и укрепление мышц кора.',
+    },
+    high: {
+      text: 'Фигура типа «яблоко» — выраженное накопление жира в области живота.',
+      risk: 'Диабет, гипертония, болезни сердца.',
+      solution: 'Коррекция питания и регулярное кардио.',
+    },
+  },
+  whtr: {
+    low: {
+      text: 'Дефицит массы тела: возможно недостаточное питание или низкая мышечная масса.',
+      solution: 'Набор веса за счёт мышц, увеличение калорийности.',
+    },
+    norm: {
+      text: 'Вес и объём талии пропорциональны росту.',
+    },
+    warn: {
+      text: 'Избыток абдоминального жира: талия больше половины роста.',
+      risk: 'Нарушение обмена веществ.',
+      solution: 'Снижение процента жира, контроль порций.',
+    },
+    high: {
+      text: 'Талия составляет больше 60% роста.',
+      risk: 'Повышенная нагрузка на сердце и сосуды.',
+      solution: 'Изменение образа жизни, консультация нутрициолога.',
+    },
+  },
+  bmi: {
+    low: {
+      text: 'Вес ниже нормы для вашего роста.',
+      solution: 'Набор массы за счёт мышц, увеличение калорийности.',
+    },
+    norm: { text: 'Вес соответствует росту.' },
+    warn: {
+      text: 'Избыточная масса тела.',
+      risk: 'Замедление метаболизма.',
+      solution: 'Дефицит калорий и силовые тренировки.',
+    },
+    high: {
+      text: 'Ожирение — высокий риск для здоровья.',
+      risk: 'Диабет, боли в суставах.',
+      solution: 'Комплексный подход: питание, кардио и силовые.',
+    },
+  },
+  fat: {
+    low: {
+      text: 'Процент жира ниже нормы.',
+      risk: 'Гормональные сбои, снижение иммунитета.',
+      solution: 'Поднять калорийность, добавить полезные жиры в рацион.',
+    },
+    norm: { text: 'Здоровый процент жира, тело выглядит спортивным.' },
+    warn: {
+      text: 'Избыточный процент жира («скинни-фэт»): вес может быть в норме, но тело дряблое.',
+      risk: 'Скрытое ожирение.',
+      solution: 'Замена жира на мышцы через силовые тренировки.',
+    },
+    high: {
+      text: 'Высокий процент жира — нужна серьёзная работа над составом тела.',
+      risk: 'Метаболический синдром.',
+      solution: 'Контроль питания и регулярные тренировки.',
+    },
+  },
+  muscle: {
+    norm: { text: 'Хорошая мышечная масса, метаболизм работает эффективно.' },
+    warn: {
+      text: 'Низкая мышечная масса. Мышцы — двигатель для сжигания калорий: чем их меньше, тем легче набрать жир.',
+      solution:
+        'Силовые тренировки 3 раза в неделю, достаточное количество белка.',
+    },
+  },
+  visceral: {
+    norm: { text: 'Жир вокруг внутренних органов в безопасном количестве.' },
+    warn: {
+      text: 'Повышенный уровень: жир обволакивает внутренние органы.',
+      risk: 'Нарушение работы печени и сердца.',
+      solution: 'Кардио и снижение калорийности рациона.',
+    },
+    high: {
+      text: 'Критический уровень висцерального жира.',
+      risk: 'Болезни сердца и сосудов, диабет.',
+      solution: 'Консультация врача и нутрициолога, регулярное кардио.',
+    },
+  },
+  water: {
+    norm: { text: 'Хороший водный баланс.' },
+    low: {
+      text: 'Обезвоживание: замедляет метаболизм и восстановление.',
+      solution: 'Пить около 30 мл чистой воды на 1 кг веса.',
+    },
+    high: {
+      text: 'Воды больше нормы — возможна задержка жидкости.',
+      solution: 'Проверить питьевой режим и количество соли в рационе.',
+    },
+  },
+  metabolicAge: {
+    norm: { text: 'Метаболический возраст не выше фактического.' },
+    warn: {
+      text: 'Метаболический возраст выше фактического: обмен веществ замедлен.',
+      solution: 'Набор мышечной массы и регулярное кардио.',
+    },
+  },
+};
+
+export interface Finding {
+  key: string;
+  title: string;
+  value: string;
+  level: ZoneLevel;
+  zoneLabel: string;
+  text: string;
+  risk?: string;
+  solution?: string;
+}
+
+export interface Conclusion {
+  strengths: Finding[];
+  risks: Finding[];
+  notes: string[];
+  disclaimer: string;
+}
+
+export const DISCLAIMER =
+  'Это фитнес-оценка состава тела, а не медицинский диагноз. При показателях из красной зоны рекомендуем консультацию врача.';
+
+const num = (value: number) =>
+  value.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+
+const SEVERITY: Record<ZoneLevel, number> = {
+  high: 0,
+  warn: 1,
+  low: 2,
+  norm: 3,
+};
+
+const years = (value: number) => {
+  const tail = Math.abs(value) % 100;
+  if (tail > 10 && tail < 20) return 'лет';
+  const last = tail % 10;
+  if (last === 1) return 'год';
+  if (last >= 2 && last <= 4) return 'года';
+  return 'лет';
+};
+
+function finding(
+  key: string,
+  title: string,
+  value: string,
+  zone: Zone | null,
+): Finding | null {
+  if (!zone) return null;
+  const verdict = VERDICTS[key]?.[zone.level];
+  if (!verdict) return null;
+  return {
+    key,
+    title,
+    value,
+    level: zone.level,
+    zoneLabel: zone.label,
+    text: verdict.text,
+    risk: verdict.risk,
+    solution: verdict.solution,
+  };
 }
 
 export function derive(card: CardBasics, m: MeasurementNumbers) {
@@ -236,14 +467,98 @@ export function derive(card: CardBasics, m: MeasurementNumbers) {
       : null;
   if (bmi) bmi.zone = bmiZone(bmi.value);
 
+  const age = ageAt(card.birthDate, m.takenAt);
+  const waist = m.waistCm == null ? null : waistZone(m.waistCm, card.sex);
+  const fat = m.fatPct == null ? null : fatZone(m.fatPct, card.sex);
+  const muscle =
+    m.muscleKg == null ? null : muscleZone(m.muscleKg, m.weightKg, card.sex);
+  const water = m.waterPct == null ? null : waterZone(m.waterPct, card.sex);
+  const visceral = m.visceralFat == null ? null : visceralZone(m.visceralFat);
+  const metabolic =
+    m.metabolicAge == null ? null : metabolicAgeZone(m.metabolicAge, age);
+
+  const findings = [
+    finding('waist', 'Обхват талии', `${num(m.waistCm ?? 0)} см`, waist),
+    finding(
+      'whr',
+      'Талия / бёдра',
+      whr ? num(whr.value) : '',
+      whr?.zone ?? null,
+    ),
+    finding(
+      'whtr',
+      'Талия / рост',
+      whtr ? num(whtr.value) : '',
+      whtr?.zone ?? null,
+    ),
+    finding('bmi', 'ИМТ', bmi ? num(bmi.value) : '', bmi?.zone ?? null),
+    finding('fat', '% жира', `${num(m.fatPct ?? 0)} %`, fat),
+    finding(
+      'muscle',
+      'Мышечная масса',
+      musclePct(m.muscleKg ?? 0, m.weightKg)
+        ? `${num(m.muscleKg ?? 0)} кг · ${num(musclePct(m.muscleKg ?? 0, m.weightKg)!)} % от веса`
+        : `${num(m.muscleKg ?? 0)} кг`,
+      muscle,
+    ),
+    finding('visceral', 'Висцеральный жир', num(m.visceralFat ?? 0), visceral),
+    finding('water', '% воды', `${num(m.waterPct ?? 0)} %`, water),
+    finding(
+      'metabolicAge',
+      'Метаболический возраст',
+      `${num(m.metabolicAge ?? 0)} ${years(m.metabolicAge ?? 0)}`,
+      metabolic,
+    ),
+  ].filter((f): f is Finding => f !== null);
+
+  const notes: string[] = [];
+  if (m.bmr)
+    notes.push(
+      `Базовый метаболизм — ${num(m.bmr)} ккал: столько тело тратит в покое. Питаться ниже этой цифры нельзя, иначе обмен веществ замедлится ещё сильнее.`,
+    );
+  if (m.boneKg)
+    notes.push(
+      `Костная масса — ${num(m.boneKg)} кг: ориентир прочности скелета, важен для профилактики остеопороза.`,
+    );
+
+  const conclusion: Conclusion = {
+    strengths: findings.filter((f) => f.level === 'norm'),
+    risks: findings
+      .filter((f) => f.level !== 'norm')
+      .sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]),
+    notes,
+    disclaimer: DISCLAIMER,
+  };
+
   return {
-    age: ageAt(card.birthDate, m.takenAt),
+    age,
     bmi,
     whr,
     whtr,
     ideal: idealWeight(height, card.sex, card.bodyType),
-    fat: m.fatPct == null ? null : fatZone(m.fatPct, card.sex),
-    water: m.waterPct == null ? null : waterZone(m.waterPct, card.sex),
-    visceral: m.visceralFat == null ? null : visceralZone(m.visceralFat),
+    waist,
+    fat,
+    muscle,
+    water,
+    visceral,
+    metabolicAge: metabolic,
+    conclusion,
   };
+}
+
+export function conclusionText(conclusion: Conclusion) {
+  const strengths = conclusion.strengths
+    .map((f) => `${f.title} (${f.value}) — ${f.text}`)
+    .join('\n');
+
+  const risks = conclusion.risks
+    .map((f) => {
+      const lines = [`${f.title} (${f.value}) — ${f.zoneLabel}. ${f.text}`];
+      if (f.risk) lines.push(`Риск: ${f.risk}`);
+      if (f.solution) lines.push(`Что делать: ${f.solution}`);
+      return lines.join(' ');
+    })
+    .join('\n');
+
+  return { strengths, risks };
 }
