@@ -171,6 +171,15 @@ class UpsertTestDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+const WHO = {
+  username: true,
+  trainer: { select: { name: true } },
+} as const;
+
+const whoName = (
+  who: { username: string; trainer: { name: string } | null } | null,
+) => who?.trainer?.name ?? who?.username ?? null;
+
 @Injectable()
 export class ClientsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -236,7 +245,7 @@ export class ClientsService {
 
     const card = await this.prisma.clientCard.findUnique({
       where: { userId },
-      include: { updatedBy: { select: { username: true } } },
+      include: { updatedBy: { select: WHO } },
     });
 
     const rows = card
@@ -244,8 +253,8 @@ export class ClientsService {
           where: { cardId: card.id },
           orderBy: [{ takenAt: 'asc' }, { id: 'asc' }],
           include: {
-            createdBy: { select: { id: true, username: true } },
-            updatedBy: { select: { username: true } },
+            createdBy: { select: { id: true, ...WHO } },
+            updatedBy: { select: WHO },
             tests: true,
           },
         })
@@ -268,11 +277,12 @@ export class ClientsService {
           if (now != null && was != null) delta[key] = round1(now - was);
         }
       }
-      const editor = m.updatedBy?.username ?? null;
+      const author = whoName(m.createdBy);
+      const editor = whoName(m.updatedBy);
       return {
         ...m,
-        author: m.createdBy?.username ?? null,
-        editor: editor && editor !== m.createdBy?.username ? editor : null,
+        author,
+        editor: editor && editor !== author ? editor : null,
         derived: derive(basics, m),
         delta,
         prevAt: prev?.takenAt ?? null,
@@ -290,7 +300,7 @@ export class ClientsService {
             bodyType: card.bodyType,
             note: card.note,
             updatedAt: card.updatedAt,
-            updatedBy: card.updatedBy?.username ?? null,
+            updatedBy: whoName(card.updatedBy),
           }
         : null,
       measurements: measurements.reverse(),

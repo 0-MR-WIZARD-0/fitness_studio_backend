@@ -421,6 +421,10 @@ export class BookingService {
         throw new BadRequestException('Слот уже прошёл');
       if (slot._count.bookings >= slot.capacity)
         throw new ConflictException('Свободных мест нет');
+      if (promo && (slot.isDiagnostic || !slot.format?.inCourse))
+        throw new BadRequestException(
+          'Промокод действует только на занятия, входящие в курс',
+        );
 
       const base = this.slotPrice(slot);
       const free = slot.isDiagnostic || !!promo;
@@ -611,9 +615,9 @@ export class BookingService {
   async bookAnnouncement(dto: AnnouncementBookingDto, userId: number | null) {
     const user = userId ? await this.client(userId) : null;
     await this.documents.ensureAccepted(dto.documentIds);
-    if (dto.promoCode && !user)
-      throw new UnauthorizedException(
-        'Промокод работает в личном кабинете — войдите',
+    if (dto.promoCode)
+      throw new BadRequestException(
+        'Промокод действует только на занятия, входящие в курс',
       );
     const waiting = this.known(user, dto);
     if (waiting) {
@@ -623,13 +627,6 @@ export class BookingService {
       );
       if (hit) return this.resumedPayment(hit);
     }
-    const promo = dto.promoCode
-      ? await this.promo.validate(dto.promoCode)
-      : null;
-    if (dto.promoCode && !promo)
-      throw new BadRequestException(
-        'Промокод недействителен или уже использован',
-      );
 
     const result = await this.prisma.$transaction(async (tx) => {
       const a = await tx.announcement.findUnique({
@@ -646,13 +643,8 @@ export class BookingService {
       if (a._count.bookings >= a.capacity)
         throw new ConflictException('Мест нет');
 
-      const free = a.isFree || !!promo;
+      const free = a.isFree;
       const price = free ? 0 : a.price;
-      if (promo)
-        await tx.promoCode.update({
-          where: { id: promo.id },
-          data: { isUsed: true, usedAt: new Date() },
-        });
 
       const client = user ?? this.guest(dto);
       await this.ensureNotBooked(
@@ -670,7 +662,6 @@ export class BookingService {
           email: client.email,
           price,
           isFree: free,
-          promoCodeId: promo?.id,
         },
       });
       return { booking, free, price, title: a.title };
